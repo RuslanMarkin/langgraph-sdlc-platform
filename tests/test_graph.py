@@ -8,4 +8,4 @@ def test_healthcheck_graph_completes() -> None:
     )
 
     assert result["status"] == "ok"
-    assert result["message"] == "LangGraph runtime ready (thread_id=test-thread)."
+    assert result["message"] == "LangGraph runtime ready."

@@ -3,10 +3,10 @@
 It is deliberately domain-neutral. Replace or extend its node in a feature branch.
 """
 
-from typing import TypedDict
+from typing import Any, cast
 
-from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
+from typing_extensions import TypedDict
 
 
 class HealthcheckState(TypedDict):
@@ -14,19 +14,20 @@ class HealthcheckState(TypedDict):
     message: str
 
 
-def verify_runtime(_: HealthcheckState, config: RunnableConfig) -> HealthcheckState:
+def verify_runtime(_: HealthcheckState) -> HealthcheckState:
     """Provide a traceable LangGraph node without calling an LLM."""
-    thread_id = config.get("configurable", {}).get("thread_id", "unknown")
     return {
         "status": "ok",
-        "message": f"LangGraph runtime ready (thread_id={thread_id}).",
+        "message": "LangGraph runtime ready.",
     }
 
 
-def build_healthcheck_graph():
+def build_healthcheck_graph() -> Any:
     """Compile the smoke-check graph used in local and CI verification."""
     builder = StateGraph(HealthcheckState)
-    builder.add_node("verify_runtime", verify_runtime)
+    # LangGraph's runtime accepts this typed node; cast only bridges an incomplete
+    # third-party mypy overload at the framework boundary.
+    builder.add_node("verify_runtime", cast(Any, verify_runtime))
     builder.add_edge(START, "verify_runtime")
     builder.add_edge("verify_runtime", END)
     return builder.compile()
