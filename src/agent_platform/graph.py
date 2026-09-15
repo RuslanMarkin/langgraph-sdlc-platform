@@ -3,7 +3,7 @@
 It is deliberately domain-neutral. Replace or extend its node in a feature branch.
 """
 
-from typing import Any
+from typing import Any, cast
 
 from langgraph.graph import END, START, StateGraph
 from typing_extensions import TypedDict
@@ -25,7 +25,9 @@ def verify_runtime(_: HealthcheckState) -> HealthcheckState:
 def build_healthcheck_graph() -> Any:
     """Compile the smoke-check graph used in local and CI verification."""
     builder = StateGraph(HealthcheckState)
-    builder.add_node("verify_runtime", verify_runtime)
+    # LangGraph's runtime accepts this typed node; cast only bridges an incomplete
+    # third-party mypy overload at the framework boundary.
+    builder.add_node("verify_runtime", cast(Any, verify_runtime))
     builder.add_edge(START, "verify_runtime")
     builder.add_edge("verify_runtime", END)
     return builder.compile()
