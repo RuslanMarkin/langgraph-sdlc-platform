@@ -1,0 +1,134 @@
+"""Human-gated LangGraph workflow with parallel development and test preparation."""
+
+from operator import add
+from typing import Annotated, Any, Literal, cast
+
+from langgraph.graph import END, START, StateGraph
+from langgraph.types import Send, interrupt
+from typing_extensions import TypedDict
+
+from agent_platform.sdlc_agents import (
+    AnalysisDraft,
+    AnalystAgent,
+    BusinessRequest,
+    DeveloperPlannerAgent,
+    TestDesignerAgent,
+    _read_repository_evidence,
+)
+
+
+class SdlcState(TypedDict, total=False):
+    """Persisted state; all artifacts are structured and versionable."""
+
+    request: dict[str, Any]
+    project_root: str
+    evidence_paths: list[str]
+    analysis_draft: dict[str, Any]
+    development_plan: dict[str, Any]
+    test_plan: dict[str, Any]
+    stage: str
+    human_decisions: dict[str, Any]
+    audit_trail: Annotated[list[str], add]
+
+
+def _approved(decision: dict[str, Any]) -> bool:
+    return decision.get("decision") == "approve"
+
+
+def build_sdlc_workflow(
+    analyst: AnalystAgent,
+    developer: DeveloperPlannerAgent,
+    test_designer: TestDesignerAgent,
+    *,
+    checkpointer: Any,
+) -> Any:
+    """Build a workflow where no role can advance without human confirmation."""
+
+    def draft_analysis(state: SdlcState) -> SdlcState:
+        request = BusinessRequest.model_validate(state["request"])
+        evidence = _read_repository_evidence(state["project_root"], state["evidence_paths"])
+        draft = analyst.draft(request, evidence)
+        return {
+            "analysis_draft": draft.model_dump(),
+            "stage": "awaiting_analyst_approval",
+            "audit_trail": ["analyst_draft_created"],
+        }
+
+    def approve_analysis(state: SdlcState) -> SdlcState:
+        decision = cast(
+            dict[str, Any],
+            interrupt(
+                {
+                    "gate": "analyst_approval",
+                    "artifact": state["analysis_draft"],
+                    "allowed_decisions": ["approve", "reject"],
+                }
+            ),
+        )
+        return {
+            "human_decisions": {"analyst": decision},
+            "stage": "analysis_approved" if _approved(decision) else "analysis_rejected",
+            "audit_trail": [f"analyst_{decision.get('decision', 'invalid')}"],
+        }
+
+    def route_after_analysis(state: SdlcState) -> list[Send] | Literal["__end__"]:
+        decision = state["human_decisions"]["analyst"]
+        if not _approved(decision):
+            return cast(Literal["__end__"], END)
+        return [
+            Send("prepare_development_plan", state),
+            Send("prepare_test_plan", state),
+        ]
+
+    def prepare_development_plan(state: SdlcState) -> SdlcState:
+        analysis = AnalysisDraft.model_validate(state["analysis_draft"])
+        plan = developer.plan(analysis)
+        return {
+            "development_plan": plan.model_dump(),
+            "audit_trail": ["development_plan_created"],
+        }
+
+    def prepare_test_plan(state: SdlcState) -> SdlcState:
+        analysis = AnalysisDraft.model_validate(state["analysis_draft"])
+        plan = test_designer.plan(analysis)
+        return {
+            "test_plan": plan.model_dump(),
+            "audit_trail": ["test_plan_created"],
+        }
+
+    def approve_parallel_outputs(state: SdlcState) -> SdlcState:
+        decision = cast(
+            dict[str, Any],
+            interrupt(
+                {
+                    "gate": "development_and_test_approval",
+                    "artifacts": {
+                        "development_plan": state["development_plan"],
+                        "test_plan": state["test_plan"],
+                    },
+                    "allowed_decisions": ["approve", "reject"],
+                }
+            ),
+        )
+        return {
+            "human_decisions": {**state["human_decisions"], "plans": decision},
+            "stage": "ready_for_implementation" if _approved(decision) else "plans_rejected",
+            "audit_trail": [f"parallel_plans_{decision.get('decision', 'invalid')}"],
+        }
+
+    builder = StateGraph(SdlcState)
+    builder.add_node("draft_analysis", draft_analysis)
+    builder.add_node("approve_analysis", approve_analysis)
+    builder.add_node("prepare_development_plan", prepare_development_plan)
+    builder.add_node("prepare_test_plan", prepare_test_plan)
+    builder.add_node("approve_parallel_outputs", approve_parallel_outputs)
+    builder.add_edge(START, "draft_analysis")
+    builder.add_edge("draft_analysis", "approve_analysis")
+    builder.add_conditional_edges(
+        "approve_analysis",
+        route_after_analysis,
+    )
+    builder.add_edge("prepare_development_plan", "approve_parallel_outputs")
+    builder.add_edge("prepare_test_plan", "approve_parallel_outputs")
+    builder.add_edge("approve_parallel_outputs", END)
+    return builder.compile(checkpointer=checkpointer)

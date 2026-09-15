@@ -11,4 +11,6 @@ services:
       - ./src:/app/src
       - ./tests:/app/tests
       - ./evals:/app/evals
+      - ../crm-almaz:/work/crm-almaz:ro
+      - ./sdlc-input:/work/input:ro
     working_dir: /app
