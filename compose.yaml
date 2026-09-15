@@ -5,7 +5,10 @@ services:
     env_file:
       - path: .env
         required: false
+    environment:
+      PYTHONPATH: /app/src
     volumes:
       - ./src:/app/src
       - ./tests:/app/tests
+      - ./evals:/app/evals
     working_dir: /app

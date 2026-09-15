@@ -12,6 +12,12 @@
 
 Продуктовая логика намеренно не задана: первый graph — это только smoke-check окружения. Новая функциональность добавляется отдельной веткой и заменяет его либо расширяет.
 
+## Evals
+
+В проекте есть готовая структура для воспроизводимых оценок: versioned JSONL
+datasets, deterministic graders и adapter к Langfuse Experiments. Подробный
+контракт и порядок работы — в [evals/README.md](evals/README.md).
+
 ## Быстрый старт
 
 ### 1. Создайте проект в Langfuse Cloud
