@@ -1,0 +1,1 @@
+{"id":"infrastructure-healthcheck-001","input":{"status":"pending","message":""},"expected_output":{"status":"ok","message":"LangGraph runtime ready."},"metadata":{"category":"regression","risk":"low","description":"Проверяет, что базовый граф собирается и завершается."}}
