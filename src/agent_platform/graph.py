@@ -3,9 +3,10 @@
 It is deliberately domain-neutral. Replace or extend its node in a feature branch.
 """
 
-from typing import Any, TypedDict
+from typing import Any
 
 from langgraph.graph import END, START, StateGraph
+from typing_extensions import TypedDict
 
 
 class HealthcheckState(TypedDict):
