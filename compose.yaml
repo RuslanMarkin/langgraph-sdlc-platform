@@ -1,0 +1,11 @@
+services:
+  app:
+    build:
+      context: .
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./src:/app/src
+      - ./tests:/app/tests
+    working_dir: /app
