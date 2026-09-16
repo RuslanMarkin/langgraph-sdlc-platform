@@ -5,6 +5,7 @@ from agent_platform.github_approval import (
     GitHubApprovalGateway,
     is_trusted_author,
     parse_approval_comment,
+    parse_approval_gate_marker,
     parse_thread_marker,
 )
 
@@ -57,6 +58,8 @@ def test_thread_marker_is_read_from_approval_issue_body() -> None:
 
     assert parse_thread_marker(body) == "github:CRM:issue:42"
     assert parse_thread_marker("обычный Issue") is None
+    assert parse_approval_gate_marker(body) == "analyst_approval"
+    assert parse_approval_gate_marker("обычный Issue") is None
 
 
 def test_gateway_reads_comment_from_repository_wide_endpoint(

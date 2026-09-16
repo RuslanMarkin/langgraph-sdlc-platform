@@ -12,6 +12,7 @@ from agent_platform.github_approval import (
     GitHubApprovalGateway,
     is_trusted_author,
     parse_approval_comment,
+    parse_approval_gate_marker,
     parse_thread_marker,
 )
 from agent_platform.observability import flush_langfuse, langfuse_callbacks
@@ -68,9 +69,8 @@ def _publish_interrupt(
     title: str,
     thread_id: str,
 ) -> None:
-    """Publish one new approval Issue and persist its identity with the graph."""
+    """Publish one new approval Issue without changing the interrupted checkpoint."""
     if "__interrupt__" not in result:
-        graph.update_state(config, {"approval_gate": {"status": "completed"}})
         print(json.dumps({"status": "completed", "thread_id": thread_id}))
         return
     artifact = cast(dict[str, Any], result["__interrupt__"][0].value)
@@ -82,20 +82,19 @@ def _publish_interrupt(
         artifact=artifact,
         thread_id=thread_id,
     )
-    graph.update_state(
-        config,
-        {
-            "approval_gate": {
-                "status": "awaiting",
-                "issue_number": issue_number,
-                "gate": gate,
-                "issue_url": issue_url,
-            }
-        },
-    )
     print(
         json.dumps({"status": "awaiting_approval", "issue_url": issue_url, "thread_id": thread_id})
     )
+
+
+def _pending_gate(snapshot: Any) -> str | None:
+    """Return the sole human gate currently suspended in a LangGraph checkpoint."""
+    for task in snapshot.tasks:
+        for pending_interrupt in task.interrupts:
+            value = pending_interrupt.value
+            if isinstance(value, dict) and isinstance(value.get("gate"), str):
+                return cast(str, value["gate"])
+    return None
 
 
 def run_start(args: argparse.Namespace, settings: Settings) -> None:
@@ -146,6 +145,7 @@ def run_resume(args: argparse.Namespace, settings: Settings) -> None:
     thread_id = parse_thread_marker(str(approval_issue.get("body") or ""))
     if not thread_id:
         raise RuntimeError("Issue не содержит маркер LangGraph thread_id.")
+    issue_gate = parse_approval_gate_marker(str(approval_issue.get("body") or ""))
     comment = gateway.get_comment(args.comment_id)
     decision = parse_approval_comment(comment)
     if decision is None:
@@ -157,23 +157,9 @@ def run_resume(args: argparse.Namespace, settings: Settings) -> None:
         analyst, developer, test_designer = build_production_agents(settings)
         graph = build_sdlc_workflow(analyst, developer, test_designer, checkpointer=checkpointer)
         snapshot = graph.get_state(config)
-        approval_gate = cast(dict[str, Any], snapshot.values.get("approval_gate") or {})
-        if (
-            approval_gate.get("status") != "awaiting"
-            or approval_gate.get("issue_number") != args.approval_issue_number
-        ):
+        if approval_issue.get("state") != "open" or issue_gate != _pending_gate(snapshot):
             print(json.dumps({"status": "stale_comment", "thread_id": thread_id}))
             return
-        graph.update_state(
-            config,
-            {
-                "approval_gate": {
-                    **approval_gate,
-                    "status": "processing",
-                    "comment_id": args.comment_id,
-                }
-            },
-        )
         result = graph.invoke(Command(resume=decision), config=config)
         gateway.complete_issue(args.approval_issue_number, decision)
         request = cast(dict[str, Any], graph.get_state(config).values["request"])
