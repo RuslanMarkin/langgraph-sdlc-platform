@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     sdlc_database_url: str | None = None
     langfuse_public_key: str | None = None
     langfuse_secret_key: str | None = None
-    langfuse_host: str = "https://cloud.langfuse.com"
+    langfuse_base_url: str = "https://cloud.langfuse.com"
 
     @property
     def langfuse_enabled(self) -> bool:
