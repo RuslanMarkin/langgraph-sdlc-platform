@@ -102,8 +102,10 @@ git switch -c feature/<краткое-название>
 3. Только после `approve` параллельно запускаются агент планирования разработки
    и независимый QA-агент, создающий план автоматических и staging-проверок из
    той же спецификации.
-4. Человек утверждает или отклоняет оба пакета. До этого состояние
-   `ready_for_implementation` недостижимо.
+4. Человек утверждает или отклоняет оба пакета. При `reject` его замечания и
+   предыдущие версии одновременно возвращаются Developer- и QA-агентам, после
+   чего graph снова останавливается на проверке обновлённых пакетов. До
+   `approve` состояние `ready_for_implementation` недостижимо.
 
 Для локального демо используется `InMemorySaver`. Перед подключением к реальной
 GitHub-автоматизации его нужно заменить на постоянный checkpointer PostgreSQL:
@@ -135,8 +137,8 @@ docker compose run --rm app python -m agent_platform.run_sdlc_pilot \
 ```
 
 Команда покажет каждый artifact и запросит JSON-решение человека. Например,
-`{"decision":"approve","reviewer":"Иван Петров"}`. Отклонение завершает
-пилот без каких-либо изменений кода.
+`{"decision":"approve","reviewer":"Иван Петров"}`. При отклонении graph
+запускает повторную подготовку соответствующего артефакта и снова ждёт человека.
 
 Перед запуском создайте локальную, некоммитируемую папку `sdlc-input/` и
 положите в неё `request.json`. CRM подключается в контейнер только для чтения
@@ -149,6 +151,19 @@ docker compose run --rm app python -m agent_platform.run_sdlc_pilot \
 оставляет комментарий `/approve` либо `/reject причина`. Команда сохраняется
 в состоянии с GitHub-логином, ссылкой и временем, Issue закрывается, а graph
 продолжает выполнение.
+
+Если аналитика уже была утверждена, повторную параллельную подготовку планов
+можно начать без нового вызова аналитика:
+
+```bash
+docker compose run --rm app python -m agent_platform.run_sdlc_pilot \
+  --request /work/input/request.json \
+  --project-root /work/crm-almaz \
+  --approved-analysis /work/input/approved-analysis.json \
+  --plans-feedback-file /work/input/plans-feedback.txt \
+  --plans-feedback-reviewer RuslanMarkin \
+  --plans-feedback-source-url https://github.com/owner/repository/issues/1#issuecomment-1
+```
 
 Для локального пилота добавьте в `.env` fine-grained token с доступом только к
 целевому репозиторию и правом **Issues: Read and write**:

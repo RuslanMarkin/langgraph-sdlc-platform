@@ -60,12 +60,24 @@ class AnalystAgent(Protocol):
 
 
 class DeveloperPlannerAgent(Protocol):
-    def plan(self, analysis: AnalysisDraft) -> DevelopmentPlan:
+    def plan(
+        self,
+        analysis: AnalysisDraft,
+        *,
+        previous_plan: DevelopmentPlan | None = None,
+        feedback: str | None = None,
+    ) -> DevelopmentPlan:
         """Prepare a code plan from an approved specification."""
 
 
 class TestDesignerAgent(Protocol):
-    def plan(self, analysis: AnalysisDraft) -> TestPlanDraft:
+    def plan(
+        self,
+        analysis: AnalysisDraft,
+        *,
+        previous_plan: TestPlanDraft | None = None,
+        feedback: str | None = None,
+    ) -> TestPlanDraft:
         """Prepare test design from an approved specification."""
 
 
@@ -167,7 +179,20 @@ class LangChainDeveloperPlannerAgent:
             DevelopmentPlan, method="json_mode"
         )
 
-    def plan(self, analysis: AnalysisDraft) -> DevelopmentPlan:
+    def plan(
+        self,
+        analysis: AnalysisDraft,
+        *,
+        previous_plan: DevelopmentPlan | None = None,
+        feedback: str | None = None,
+    ) -> DevelopmentPlan:
+        revision_context = ""
+        if previous_plan and feedback:
+            revision_context = (
+                "\n\nПредыдущий план реализации:\n"
+                f"{previous_plan.model_dump_json(indent=2)}\n\n"
+                f"Замечания человека, обязательные для новой версии:\n{feedback}"
+            )
         response = self.model.invoke(
             [
                 SystemMessage(
@@ -177,7 +202,7 @@ class LangChainDeveloperPlannerAgent:
                         f"расширяй scope.\n\n{_json_instruction(DevelopmentPlan)}"
                     )
                 ),
-                HumanMessage(content=analysis.model_dump_json(indent=2)),
+                HumanMessage(content=analysis.model_dump_json(indent=2) + revision_context),
             ]
         )
         return cast(DevelopmentPlan, response)
@@ -191,7 +216,20 @@ class LangChainTestDesignerAgent:
             TestPlanDraft, method="json_mode"
         )
 
-    def plan(self, analysis: AnalysisDraft) -> TestPlanDraft:
+    def plan(
+        self,
+        analysis: AnalysisDraft,
+        *,
+        previous_plan: TestPlanDraft | None = None,
+        feedback: str | None = None,
+    ) -> TestPlanDraft:
+        revision_context = ""
+        if previous_plan and feedback:
+            revision_context = (
+                "\n\nПредыдущий тест-план:\n"
+                f"{previous_plan.model_dump_json(indent=2)}\n\n"
+                f"Замечания человека, обязательные для новой версии:\n{feedback}"
+            )
         response = self.model.invoke(
             [
                 SystemMessage(
@@ -201,15 +239,15 @@ class LangChainTestDesignerAgent:
                         f"{_json_instruction(TestPlanDraft)}"
                     )
                 ),
-                HumanMessage(content=analysis.model_dump_json(indent=2)),
+                HumanMessage(content=analysis.model_dump_json(indent=2) + revision_context),
             ]
         )
         return cast(TestPlanDraft, response)
 
 
-def build_production_agents(settings: Settings) -> tuple[
-    AnalystAgent, DeveloperPlannerAgent, TestDesignerAgent
-]:
+def build_production_agents(
+    settings: Settings,
+) -> tuple[AnalystAgent, DeveloperPlannerAgent, TestDesignerAgent]:
     """Create the three distinct LLM roles for a production-like pilot."""
     return (
         LangChainAnalystAgent(settings),
