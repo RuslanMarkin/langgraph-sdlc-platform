@@ -84,6 +84,7 @@ class FeatureBranchWorkspace:
 
     def verify_commit_and_push(self, *, paths: list[str], feature_id: str) -> str:
         self._run(["pnpm", "check"])
+        self._run(["pnpm", "test"])
         self._run(["git", "add", "--", *paths])
         changed = subprocess.run(
             ["git", "diff", "--cached", "--quiet"], cwd=self.root, check=False
@@ -103,7 +104,7 @@ class FeatureBranchWorkspace:
         )
         self._run(["git", "commit", "-m", f"Реализовать {feature_id} по утверждённой спецификации"])
         self._run(["git", "push", "origin", "HEAD"])
-        return "pnpm check"
+        return "pnpm check; pnpm test"
 
     def _run(self, command: list[str]) -> None:
         completed = subprocess.run(
