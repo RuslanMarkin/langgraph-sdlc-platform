@@ -186,13 +186,14 @@ class LangChainDeveloperPlannerAgent:
         previous_plan: DevelopmentPlan | None = None,
         feedback: str | None = None,
     ) -> DevelopmentPlan:
-        revision_context = ""
-        if previous_plan and feedback:
-            revision_context = (
-                "\n\nПредыдущий план реализации:\n"
-                f"{previous_plan.model_dump_json(indent=2)}\n\n"
-                f"Замечания человека, обязательные для новой версии:\n{feedback}"
+        revision_parts: list[str] = []
+        if previous_plan:
+            revision_parts.append(
+                f"Предыдущий план реализации:\n{previous_plan.model_dump_json(indent=2)}"
             )
+        if feedback:
+            revision_parts.append(f"Замечания человека, обязательные для новой версии:\n{feedback}")
+        revision_context = "\n\n" + "\n\n".join(revision_parts) if revision_parts else ""
         response = self.model.invoke(
             [
                 SystemMessage(
@@ -223,13 +224,14 @@ class LangChainTestDesignerAgent:
         previous_plan: TestPlanDraft | None = None,
         feedback: str | None = None,
     ) -> TestPlanDraft:
-        revision_context = ""
-        if previous_plan and feedback:
-            revision_context = (
-                "\n\nПредыдущий тест-план:\n"
-                f"{previous_plan.model_dump_json(indent=2)}\n\n"
-                f"Замечания человека, обязательные для новой версии:\n{feedback}"
+        revision_parts: list[str] = []
+        if previous_plan:
+            revision_parts.append(
+                f"Предыдущий тест-план:\n{previous_plan.model_dump_json(indent=2)}"
             )
+        if feedback:
+            revision_parts.append(f"Замечания человека, обязательные для новой версии:\n{feedback}")
+        revision_context = "\n\n" + "\n\n".join(revision_parts) if revision_parts else ""
         response = self.model.invoke(
             [
                 SystemMessage(
