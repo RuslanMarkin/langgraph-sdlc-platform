@@ -1,12 +1,14 @@
 """GitHub Issues as a human approval interface for LangGraph interrupts."""
 
 import json
+import re
 import time
 from dataclasses import dataclass
 from typing import Any, cast
 from urllib.request import Request, urlopen
 
 TRUSTED_ASSOCIATIONS = {"OWNER", "MEMBER", "COLLABORATOR"}
+THREAD_MARKER_PATTERN = re.compile(r"<!-- sdlc-thread:(?P<thread_id>[^\n]+) -->")
 
 
 @dataclass(frozen=True)
@@ -49,6 +51,12 @@ def parse_approval_comment(comment: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def parse_thread_marker(issue_body: str) -> str | None:
+    """Extract the LangGraph thread identifier stored in an approval Issue."""
+    match = THREAD_MARKER_PATTERN.search(issue_body)
+    return match.group("thread_id") if match else None
+
+
 class GitHubApprovalGateway:
     """Create approval issues and wait for a trusted slash command."""
 
@@ -81,12 +89,14 @@ class GitHubApprovalGateway:
         title: str,
         gate: str,
         artifact: dict[str, Any],
+        thread_id: str | None = None,
     ) -> tuple[int, str]:
         """Publish the review artifact and return the new issue number and URL."""
         artifact_json = json.dumps(artifact, ensure_ascii=False, indent=2)
         marker = f"<!-- sdlc-approval:{feature_id}:{gate} -->"
+        thread_marker = f"\n<!-- sdlc-thread:{thread_id} -->" if thread_id else ""
         body = (
-            f"{marker}\n\n"
+            f"{marker}{thread_marker}\n\n"
             f"Автоматический human gate **{gate}** для `{feature_id}`.\n\n"
             "<details><summary>Артефакт для проверки</summary>\n\n"
             f"```json\n{artifact_json}\n```\n\n</details>\n\n"
@@ -106,6 +116,20 @@ class GitHubApprovalGateway:
         )
         return int(issue["number"]), str(issue["html_url"])
 
+    def get_issue(self, issue_number: int) -> dict[str, Any]:
+        """Load one Issue so an event-driven runner can validate its marker."""
+        issue = self._request("GET", f"/issues/{issue_number}")
+        if not isinstance(issue, dict):
+            raise RuntimeError("GitHub вернул некорректный ответ для Issue.")
+        return cast(dict[str, Any], issue)
+
+    def get_comment(self, issue_number: int, comment_id: int) -> dict[str, Any]:
+        """Load the exact comment delivered by the GitHub issue_comment event."""
+        comment = self._request("GET", f"/issues/{issue_number}/comments/{comment_id}")
+        if not isinstance(comment, dict):
+            raise RuntimeError("GitHub вернул некорректный ответ для комментария.")
+        return cast(dict[str, Any], comment)
+
     def wait_for_decision(self, issue_number: int) -> dict[str, Any]:
         """Poll issue comments until a trusted reviewer submits a valid command."""
         last_comment_id = 0
@@ -121,11 +145,11 @@ class GitHubApprovalGateway:
                 decision = parse_approval_comment(comment)
                 if decision is None:
                     continue
-                self._complete_issue(issue_number, decision)
+                self.complete_issue(issue_number, decision)
                 return decision
             time.sleep(self.config.poll_seconds)
 
-    def _complete_issue(self, issue_number: int, decision: dict[str, Any]) -> None:
+    def complete_issue(self, issue_number: int, decision: dict[str, Any]) -> None:
         decision_label = "утверждено" if decision["decision"] == "approve" else "отклонено"
         reviewer = decision["reviewer"]
         source_url = decision["source_url"]

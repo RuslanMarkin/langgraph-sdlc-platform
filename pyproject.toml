@@ -13,6 +13,7 @@ dependencies = [
   "langchain-openai>=1.1,<2.0",
   "langfuse>=4.7,<5.0",
   "langgraph>=1.0,<2.0",
+  "langgraph-checkpoint-postgres>=3.0,<4.0",
   "pydantic-settings>=2.12,<3.0",
 ]
 
@@ -29,6 +30,7 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+extend-exclude = ["build"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]

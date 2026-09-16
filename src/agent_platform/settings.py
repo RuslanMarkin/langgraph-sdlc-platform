@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     github_token: str | None = None
     github_repository: str = "RuslanMarkin/CRM_Almaz"
     github_approval_poll_seconds: int = 10
+    sdlc_database_url: str | None = None
     langfuse_public_key: str | None = None
     langfuse_secret_key: str | None = None
     langfuse_host: str = "https://cloud.langfuse.com"
