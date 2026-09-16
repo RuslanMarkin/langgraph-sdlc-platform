@@ -1,6 +1,7 @@
 import pytest
 
 from agent_platform.implementation import changed_paths, validate_patch
+from agent_platform.sdlc_agents import ImplementationPatch
 
 PATCH = """diff --git a/server/routers.ts b/server/routers.ts
 index 1111111..2222222 100644
@@ -49,3 +50,8 @@ def test_patch_rejects_dependency_manifests_and_mode_changes() -> None:
         changed_paths(
             PATCH.replace("index 1111111..2222222 100644", "old mode 100644\nnew mode 100755")
         )
+
+
+def test_implementation_patch_requires_an_actual_unified_diff() -> None:
+    with pytest.raises(ValueError, match="должен начинаться"):
+        ImplementationPatch(summary="Изменений нет", unified_diff=" ")

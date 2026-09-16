@@ -3,9 +3,10 @@
 from pathlib import Path
 from typing import Any, Protocol, cast
 
+from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, field_validator
 
 from agent_platform.prompt_management import LangfusePromptManager
 from agent_platform.settings import Settings
@@ -52,6 +53,15 @@ class ImplementationPatch(BaseModel):
 
     summary: str = Field(min_length=1)
     unified_diff: str = Field(min_length=1)
+
+    @field_validator("unified_diff")
+    @classmethod
+    def require_unified_diff_header(cls, value: str) -> str:
+        """Reject prose and blank JSON values before a patch reaches Git."""
+        normalized = value.strip()
+        if not normalized.startswith("diff --git a/"):
+            raise ValueError("unified_diff должен начинаться с заголовка diff --git a/.")
+        return normalized
 
 
 class AnalystAgent(Protocol):
@@ -245,9 +255,17 @@ class LangChainImplementationAgent:
 
     def __init__(self, settings: Settings) -> None:
         self.model = _build_chat_model(settings).with_structured_output(
-            ImplementationPatch, method="json_mode"
+            ImplementationPatch, method="json_mode", include_raw=True
         )
         self.prompts = LangfusePromptManager(settings)
+
+    def _invoke_patch(self, messages: list[BaseMessage]) -> tuple[ImplementationPatch | None, str]:
+        """Read a parsed patch without treating a malformed model reply as executable output."""
+        response = cast(dict[str, Any], self.model.invoke(messages))
+        patch = response.get("parsed")
+        if isinstance(patch, ImplementationPatch):
+            return patch, ""
+        return None, str(response.get("parsing_error") or "модель не вернула валидный JSON-diff")
 
     def implement(
         self,
@@ -274,8 +292,26 @@ class LangChainImplementationAgent:
             repository_evidence=_read_repository_evidence(project_root, allowed_paths),
         )
         with self.prompts.trace_context(prompt):
-            response = self.model.invoke(prompt.messages)
-        return cast(ImplementationPatch, response), allowed_paths
+            patch, error = self._invoke_patch(prompt.messages)
+            if patch is None:
+                patch, retry_error = self._invoke_patch(
+                    [
+                        *prompt.messages,
+                        HumanMessage(
+                            content=(
+                                "Предыдущий ответ некорректен. Верни непустой unified diff: поле "
+                                "unified_diff обязано начинаться с 'diff --git a/'. Не объясняй "
+                                "причину и не возвращай пустую строку."
+                            ),
+                        ),
+                    ]
+                )
+                if patch is None:
+                    raise RuntimeError(
+                        "Агент реализации дважды вернул некорректный diff: "
+                        f"первая ошибка: {error}; повтор: {retry_error}"
+                    )
+        return patch, allowed_paths
 
 
 def build_implementation_agent(settings: Settings) -> LangChainImplementationAgent:
