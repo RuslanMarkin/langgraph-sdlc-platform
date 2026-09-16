@@ -15,8 +15,15 @@ from agent_platform.github_approval import (
     parse_approval_gate_marker,
     parse_thread_marker,
 )
+from agent_platform.implementation import FeatureBranchWorkspace
 from agent_platform.observability import flush_langfuse, langfuse_callbacks
-from agent_platform.sdlc_agents import build_production_agents
+from agent_platform.sdlc_agents import (
+    AnalysisDraft,
+    DevelopmentPlan,
+    TestPlanDraft,
+    build_implementation_agent,
+    build_production_agents,
+)
 from agent_platform.sdlc_workflow import build_sdlc_workflow
 from agent_platform.settings import Settings, get_settings
 
@@ -183,6 +190,32 @@ def run_resume(args: argparse.Namespace, settings: Settings) -> None:
             development_plan=cast(dict[str, Any], completed_state["development_plan"]),
             test_plan=cast(dict[str, Any], completed_state["test_plan"]),
         )
+        analysis = AnalysisDraft.model_validate(completed_state["analysis_draft"])
+        development_plan = DevelopmentPlan.model_validate(completed_state["development_plan"])
+        test_plan = TestPlanDraft.model_validate(completed_state["test_plan"])
+        workspace = FeatureBranchWorkspace(args.project_root)
+        workspace.checkout(branch)
+        patch, allowed_paths = build_implementation_agent(settings).implement(
+            analysis=analysis,
+            development_plan=development_plan,
+            test_plan=test_plan,
+            project_root=args.project_root,
+            evidence_paths=args.evidence,
+        )
+        verification = workspace.verify_commit_and_push(
+            paths=workspace.apply_patch(patch, allowed_paths),
+            feature_id=str(request["feature_id"]),
+        )
+        gateway.add_issue_comment(
+            pull_number,
+            (
+                "## Реализация агентом завершена\n\n"
+                f"{patch.summary}\n\n"
+                f"Проверка: `{verification}`.\n\n"
+                "PR остаётся draft. Перед переводом в review и merge требуется "
+                "проверить изменения человеком."
+            ),
+        )
         print(
             json.dumps(
                 {
@@ -190,6 +223,7 @@ def run_resume(args: argparse.Namespace, settings: Settings) -> None:
                     "branch": branch,
                     "pull_number": pull_number,
                     "pull_url": pull_url,
+                    "verification": verification,
                     "thread_id": thread_id,
                 }
             )

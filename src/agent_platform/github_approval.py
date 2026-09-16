@@ -216,6 +216,10 @@ class GitHubApprovalGateway:
         )
         self._request("PATCH", f"/issues/{issue_number}", {"state": "closed"})
 
+    def add_issue_comment(self, issue_number: int, body: str) -> None:
+        """Publish implementation evidence in the timeline of a draft pull request."""
+        self._request("POST", f"/issues/{issue_number}/comments", {"body": body})
+
     def create_draft_feature_pr(
         self,
         *,
@@ -257,9 +261,10 @@ class GitHubApprovalGateway:
                 "body": (
                     "## Автоматически созданный handoff\n\n"
                     f"Исходная бизнес-задача: {source_issue_url}\n\n"
-                    f"Ветка содержит только [{handoff_path}]({handoff_path}) с утверждёнными "
-                    "артефактами. Агент не менял продуктовый код и не может выполнить merge.\n\n"
-                    "Следующий этап — реализация в этой ветке, запуск CI и human review."
+                    f"Первый коммит содержит [{handoff_path}]({handoff_path}) с утверждёнными "
+                    "артефактами. Следующий ограниченный этап может добавить реализацию строго "
+                    "в разрешённые файлы этой ветки. Агент не может выполнить merge.\n\n"
+                    "После изменений обязательны CI и human review."
                 ),
             },
         )

@@ -47,6 +47,13 @@ class TestPlanDraft(BaseModel):
     regression_risks: list[str]
 
 
+class ImplementationPatch(BaseModel):
+    """A constrained code change emitted by the implementation agent."""
+
+    summary: str = Field(min_length=1)
+    unified_diff: str = Field(min_length=1)
+
+
 class AnalystAgent(Protocol):
     def draft(
         self,
@@ -231,6 +238,49 @@ class LangChainTestDesignerAgent:
         with self.prompts.trace_context(prompt):
             response = self.model.invoke(prompt.messages)
         return cast(TestPlanDraft, response)
+
+
+class LangChainImplementationAgent:
+    """LLM-backed patch author that cannot execute commands or write files itself."""
+
+    def __init__(self, settings: Settings) -> None:
+        self.model = _build_chat_model(settings).with_structured_output(
+            ImplementationPatch, method="json_mode"
+        )
+        self.prompts = LangfusePromptManager(settings)
+
+    def implement(
+        self,
+        *,
+        analysis: AnalysisDraft,
+        development_plan: DevelopmentPlan,
+        test_plan: TestPlanDraft,
+        project_root: str,
+        evidence_paths: list[str],
+    ) -> tuple[ImplementationPatch, list[str]]:
+        """Generate one diff restricted to files approved in both plan and allowlist."""
+        allowed_paths = sorted(set(development_plan.files_to_change) & set(evidence_paths))
+        if not allowed_paths:
+            raise RuntimeError(
+                "План разработки не содержит файлов из разрешённого набора свидетельств."
+            )
+        prompt = self.prompts.compile_chat(
+            "sdlc/implementation-patch",
+            output_schema=_json_instruction(ImplementationPatch),
+            allowed_paths=", ".join(allowed_paths),
+            analysis_json=analysis.model_dump_json(indent=2),
+            development_plan_json=development_plan.model_dump_json(indent=2),
+            test_plan_json=test_plan.model_dump_json(indent=2),
+            repository_evidence=_read_repository_evidence(project_root, allowed_paths),
+        )
+        with self.prompts.trace_context(prompt):
+            response = self.model.invoke(prompt.messages)
+        return cast(ImplementationPatch, response), allowed_paths
+
+
+def build_implementation_agent(settings: Settings) -> LangChainImplementationAgent:
+    """Create the constrained code-authoring role for an approved feature branch."""
+    return LangChainImplementationAgent(settings)
 
 
 def build_production_agents(
