@@ -61,18 +61,16 @@ def _config(thread_id: str, settings: Settings) -> dict[str, Any]:
 
 def _publish_interrupt(
     *,
-    graph: Any,
-    config: dict[str, Any],
     result: dict[str, Any],
     gateway: GitHubApprovalGateway,
     feature_id: str,
     title: str,
     thread_id: str,
-) -> None:
+) -> bool:
     """Publish one new approval Issue without changing the interrupted checkpoint."""
     if "__interrupt__" not in result:
         print(json.dumps({"status": "completed", "thread_id": thread_id}))
-        return
+        return False
     artifact = cast(dict[str, Any], result["__interrupt__"][0].value)
     gate = str(artifact["gate"])
     issue_number, issue_url = gateway.create_gate_issue(
@@ -85,6 +83,7 @@ def _publish_interrupt(
     print(
         json.dumps({"status": "awaiting_approval", "issue_url": issue_url, "thread_id": thread_id})
     )
+    return True
 
 
 def _pending_gate(snapshot: Any) -> str | None:
@@ -128,8 +127,6 @@ def run_start(args: argparse.Namespace, settings: Settings) -> None:
             config=config,
         )
         _publish_interrupt(
-            graph=graph,
-            config=config,
             result=cast(dict[str, Any], result),
             gateway=gateway,
             feature_id=f"CRM-{args.issue_number}",
@@ -163,14 +160,39 @@ def run_resume(args: argparse.Namespace, settings: Settings) -> None:
         result = graph.invoke(Command(resume=decision), config=config)
         gateway.complete_issue(args.approval_issue_number, decision)
         request = cast(dict[str, Any], graph.get_state(config).values["request"])
-        _publish_interrupt(
-            graph=graph,
-            config=config,
+        interrupted = _publish_interrupt(
             result=cast(dict[str, Any], result),
             gateway=gateway,
             feature_id=str(request["feature_id"]),
             title=str(request["title"]),
             thread_id=thread_id,
+        )
+        if interrupted:
+            return
+        source_issue_number = thread_id.rsplit(":", maxsplit=1)[-1]
+        source_issue_url = (
+            f"https://github.com/{settings.github_repository}/issues/{source_issue_number}"
+        )
+        completed_state = graph.get_state(config).values
+        branch, pull_number, pull_url = gateway.create_draft_feature_pr(
+            feature_id=str(request["feature_id"]),
+            title=str(request["title"]),
+            base_branch=settings.sdlc_base_branch,
+            source_issue_url=source_issue_url,
+            analysis=cast(dict[str, Any], completed_state["analysis_draft"]),
+            development_plan=cast(dict[str, Any], completed_state["development_plan"]),
+            test_plan=cast(dict[str, Any], completed_state["test_plan"]),
+        )
+        print(
+            json.dumps(
+                {
+                    "status": "draft_pr_created",
+                    "branch": branch,
+                    "pull_number": pull_number,
+                    "pull_url": pull_url,
+                    "thread_id": thread_id,
+                }
+            )
         )
 
 

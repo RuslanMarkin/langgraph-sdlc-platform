@@ -3,10 +3,12 @@ import pytest
 from agent_platform.github_approval import (
     GitHubApprovalConfig,
     GitHubApprovalGateway,
+    feature_branch_name,
     is_trusted_author,
     parse_approval_comment,
     parse_approval_gate_marker,
     parse_thread_marker,
+    render_feature_handoff,
 )
 
 
@@ -78,3 +80,59 @@ def test_gateway_reads_comment_from_repository_wide_endpoint(
 
     assert gateway.get_comment(123) == github_comment("/approve")
     assert calls == [("GET", "/issues/comments/123", None)]
+
+
+def test_feature_branch_name_is_deterministic_and_safe() -> None:
+    assert feature_branch_name("CRM-18", "Статусы контрагентов") == "sdlc/crm-18-handoff"
+    assert feature_branch_name("CRM-18", "Add Counterparty Status") == (
+        "sdlc/crm-18-add-counterparty-status"
+    )
+
+
+def test_feature_handoff_contains_only_review_artifacts() -> None:
+    handoff = render_feature_handoff(
+        feature_id="CRM-18",
+        title="Статусы контрагентов",
+        source_issue_url="https://github.com/owner/repo/issues/18",
+        analysis={"summary": "Добавить статусы"},
+        development_plan={"implementation_steps": ["Добавить поле"]},
+        test_plan={"automated_tests": ["Проверить список"]},
+    )
+
+    assert "продуктовых изменений" in handoff
+    assert "Добавить статусы" in handoff
+    assert "Добавить поле" in handoff
+    assert "Проверить список" in handoff
+
+
+def test_feature_pr_is_reused_when_branch_already_has_an_open_pr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gateway = GitHubApprovalGateway(
+        GitHubApprovalConfig(token="test-token", repository="owner/repo")
+    )
+    monkeypatch.setattr(gateway, "_ensure_branch", lambda branch, base: None)
+    monkeypatch.setattr(
+        gateway,
+        "_ensure_handoff_document",
+        lambda *, branch, path, content: None,
+    )
+    monkeypatch.setattr(
+        gateway,
+        "_find_open_pr",
+        lambda branch: {"number": 44, "html_url": "https://github.com/owner/repo/pull/44"},
+    )
+
+    branch, number, url = gateway.create_draft_feature_pr(
+        feature_id="CRM-18",
+        title="Статусы",
+        base_branch="main",
+        source_issue_url="https://github.com/owner/repo/issues/18",
+        analysis={},
+        development_plan={},
+        test_plan={},
+    )
+
+    assert branch == "sdlc/crm-18-handoff"
+    assert number == 44
+    assert url == "https://github.com/owner/repo/pull/44"
