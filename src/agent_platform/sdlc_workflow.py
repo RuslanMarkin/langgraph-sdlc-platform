@@ -32,6 +32,7 @@ class SdlcState(TypedDict, total=False):
     test_plan: dict[str, Any]
     stage: str
     human_decisions: dict[str, Any]
+    approval_gate: dict[str, Any]
     audit_trail: Annotated[list[str], add]
 
 

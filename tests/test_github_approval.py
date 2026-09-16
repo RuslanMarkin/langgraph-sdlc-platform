@@ -1,4 +1,4 @@
-from agent_platform.github_approval import parse_approval_comment
+from agent_platform.github_approval import parse_approval_comment, parse_thread_marker
 
 
 def github_comment(body: str, association: str = "OWNER") -> dict[str, object]:
@@ -35,3 +35,12 @@ def test_rejection_requires_feedback() -> None:
 
 def test_untrusted_public_comment_is_ignored() -> None:
     assert parse_approval_comment(github_comment("/approve", association="NONE")) is None
+
+
+def test_thread_marker_is_read_from_approval_issue_body() -> None:
+    body = (
+        "<!-- sdlc-approval:CRM-42:analyst_approval -->\n<!-- sdlc-thread:github:CRM:issue:42 -->"
+    )
+
+    assert parse_thread_marker(body) == "github:CRM:issue:42"
+    assert parse_thread_marker("обычный Issue") is None
