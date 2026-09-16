@@ -1,7 +1,7 @@
 """LangChain agents and safe repository-reading tools for SDLC workflows."""
 
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 
 from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.tools import tool
@@ -25,6 +25,8 @@ class AnalysisDraft(BaseModel):
     """Structured result that must be approved by a human analyst."""
 
     summary: str
+    evidence_assessment: Literal["confirmed", "not_found", "insufficient"]
+    evidence_references: list[str] = Field(min_length=1)
     scope: list[str] = Field(min_length=1)
     non_goals: list[str] = Field(min_length=1)
     acceptance_criteria: list[str] = Field(min_length=1)
@@ -123,7 +125,12 @@ def _json_instruction(schema: type[BaseModel]) -> str:
     )
 
 
-def _read_repository_evidence(project_root: str, paths: list[str]) -> str:
+def _read_repository_evidence(
+    project_root: str,
+    paths: list[str],
+    *,
+    max_characters_per_file: int = 8_000,
+) -> str:
     """Read explicitly allowlisted files without letting a request escape the repository."""
     root = Path(project_root).resolve()
     snippets: list[str] = []
@@ -133,7 +140,14 @@ def _read_repository_evidence(project_root: str, paths: list[str]) -> str:
             snippets.append(f"--- {relative_path} ---\n[Файл недоступен]")
             continue
         content = candidate.read_text(encoding="utf-8", errors="replace")
-        snippets.append(f"--- {relative_path} ---\n{content[:8_000]}")
+        snippet = content[:max_characters_per_file]
+        if len(content) > max_characters_per_file:
+            snippet += (
+                "\n\n[Фрагмент обрезан: показаны первые "
+                f"{max_characters_per_file} из {len(content)} символов. "
+                "Нельзя считать отсутствующие ниже элементы проверенными.]"
+            )
+        snippets.append(f"--- {relative_path} ---\n{snippet}")
     return "\n\n".join(snippets)
 
 

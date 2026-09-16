@@ -28,6 +28,8 @@ class FakeAnalyst:
         self.feedback_received = feedback
         return AnalysisDraft(
             summary="Уточнить статусы." if previous_draft else "Добавить статусы.",
+            evidence_assessment="confirmed",
+            evidence_references=["example.txt: statuses"],
             scope=["Поле статуса"],
             non_goals=["Не блокировать договоры"],
             acceptance_criteria=["Статус виден в списке"],
@@ -215,6 +217,8 @@ def test_workflow_can_start_from_approved_analysis(tmp_path: Any) -> None:
         {
             "analysis_draft": AnalysisDraft(
                 summary="Добавить статусы.",
+                evidence_assessment="confirmed",
+                evidence_references=["example.txt: statuses"],
                 scope=["Поле статуса"],
                 non_goals=["Не блокировать договоры"],
                 acceptance_criteria=["Статус виден в списке"],

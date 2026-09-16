@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from agent_platform.evals.analyst_grounding import analyst_evidence_grounding
 from agent_platform.evals.dataset import EvaluationCase, load_cases
 from agent_platform.evals.graders import exact_match
 
@@ -13,6 +14,16 @@ def test_smoke_dataset_is_valid() -> None:
 
     assert len(cases) == 1
     assert cases[0].case_id == "infrastructure-healthcheck-001"
+
+
+def test_analyst_grounding_dataset_is_valid() -> None:
+    cases = load_cases(Path("evals/datasets/analyst-evidence-grounding.jsonl"))
+
+    assert [case.case_id for case in cases] == [
+        "column-confirmed",
+        "column-not-found",
+        "column-evidence-truncated",
+    ]
 
 
 def test_dataset_rejects_duplicate_case_ids(tmp_path: Path) -> None:
@@ -44,3 +55,16 @@ def test_case_converts_to_langfuse_item() -> None:
     )
 
     assert case.to_langfuse_item()["metadata"]["case_id"] == "case-1"
+
+
+def test_analyst_grounding_requires_a_matching_assessment_and_risk() -> None:
+    score = analyst_evidence_grounding(
+        output={
+            "evidence_assessment": "not_found",
+            "evidence_references": ["client/src/pages/Counterparties.tsx"],
+            "risks_and_questions": ["Столбец не найден"],
+        },
+        expected_output={"evidence_assessment": "not_found", "requires_risk": True},
+    )
+
+    assert score.value == 1.0

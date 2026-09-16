@@ -52,3 +52,25 @@
 
 Локальные JSONL-файлы остаются источником версий в Git. Позже набор можно
 загрузить в Langfuse Datasets для совместной разметки и сравнения версий.
+
+### Проверка заземления аналитика
+
+`datasets/analyst-evidence-grounding.jsonl` проверяет, что аналитик отличает
+подтверждённое требование от отсутствующего или обрезанного свидетельства
+кода. Для каждого сценария в output требуется:
+
+- `evidence_assessment`: `confirmed`, `not_found` или `insufficient`;
+- `evidence_references`: конкретные файлы, элементы или строки кода;
+- риск в `risks_and_questions`, если цель не найдена или контекста недостаточно.
+
+Запуск реального эксперимента с текущими production prompt и моделью:
+
+```bash
+docker compose run --rm app python -m agent_platform.evals.analyst_grounding \
+  --dataset evals/datasets/analyst-evidence-grounding.jsonl \
+  --name sdlc-analyst-evidence-grounding
+```
+
+Эксперимент создаёт по trace на каждый кейс и score
+`analyst_evidence_grounding`. Этот deterministic grader проверяет контракт
+заземления, но не заменяет human review содержания спецификации.
