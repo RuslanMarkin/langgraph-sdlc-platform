@@ -1,4 +1,8 @@
+import pytest
+
 from agent_platform.github_approval import (
+    GitHubApprovalConfig,
+    GitHubApprovalGateway,
     is_trusted_author,
     parse_approval_comment,
     parse_thread_marker,
@@ -53,3 +57,21 @@ def test_thread_marker_is_read_from_approval_issue_body() -> None:
 
     assert parse_thread_marker(body) == "github:CRM:issue:42"
     assert parse_thread_marker("обычный Issue") is None
+
+
+def test_gateway_reads_comment_from_repository_wide_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gateway = GitHubApprovalGateway(
+        GitHubApprovalConfig(token="test-token", repository="owner/repo")
+    )
+    calls: list[tuple[str, str, object]] = []
+
+    def request(method: str, path: str, payload: object = None) -> dict[str, object]:
+        calls.append((method, path, payload))
+        return github_comment("/approve")
+
+    monkeypatch.setattr(gateway, "_request", request)
+
+    assert gateway.get_comment(123) == github_comment("/approve")
+    assert calls == [("GET", "/issues/comments/123", None)]
