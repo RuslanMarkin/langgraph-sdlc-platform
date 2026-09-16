@@ -10,6 +10,7 @@ from langgraph.types import Command
 from agent_platform.github_approval import (
     GitHubApprovalConfig,
     GitHubApprovalGateway,
+    is_trusted_author,
     parse_approval_comment,
     parse_thread_marker,
 )
@@ -101,6 +102,8 @@ def run_start(args: argparse.Namespace, settings: Settings) -> None:
     """Start an SDLC thread once from a labelled business Issue."""
     gateway = _build_gateway(settings)
     business_issue = gateway.get_issue(args.issue_number)
+    if not is_trusted_author(business_issue):
+        raise RuntimeError("Бизнес-Issue может запустить SDLC только от участника репозитория.")
     thread_id = f"github:{settings.github_repository}:issue:{args.issue_number}"
     config = _config(thread_id, settings)
     with PostgresSaver.from_conn_string(_require_database_url(settings)) as checkpointer:

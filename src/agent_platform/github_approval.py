@@ -20,9 +20,14 @@ class GitHubApprovalConfig:
     poll_seconds: int = 10
 
 
+def is_trusted_author(payload: dict[str, Any]) -> bool:
+    """Allow costly SDLC work only for repository participants."""
+    return payload.get("author_association") in TRUSTED_ASSOCIATIONS
+
+
 def parse_approval_comment(comment: dict[str, Any]) -> dict[str, Any] | None:
     """Translate a trusted GitHub comment into a LangGraph resume value."""
-    if comment.get("author_association") not in TRUSTED_ASSOCIATIONS:
+    if not is_trusted_author(comment):
         return None
     body = str(comment.get("body", "")).strip()
     user = comment.get("user")
