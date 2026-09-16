@@ -24,6 +24,7 @@ class SdlcState(TypedDict, total=False):
     project_root: str
     evidence_paths: list[str]
     analysis_draft: dict[str, Any]
+    analysis_feedback: str
     development_plan: dict[str, Any]
     test_plan: dict[str, Any]
     stage: str
@@ -47,7 +48,15 @@ def build_sdlc_workflow(
     def draft_analysis(state: SdlcState) -> SdlcState:
         request = BusinessRequest.model_validate(state["request"])
         evidence = _read_repository_evidence(state["project_root"], state["evidence_paths"])
-        draft = analyst.draft(request, evidence)
+        previous_draft = None
+        if state.get("analysis_draft"):
+            previous_draft = AnalysisDraft.model_validate(state["analysis_draft"])
+        draft = analyst.draft(
+            request,
+            evidence,
+            previous_draft=previous_draft,
+            feedback=state.get("analysis_feedback"),
+        )
         return {
             "analysis_draft": draft.model_dump(),
             "stage": "awaiting_analyst_approval",
@@ -65,16 +74,19 @@ def build_sdlc_workflow(
                 }
             ),
         )
-        return {
+        result: SdlcState = {
             "human_decisions": {"analyst": decision},
-            "stage": "analysis_approved" if _approved(decision) else "analysis_rejected",
+            "stage": "analysis_approved" if _approved(decision) else "analysis_revision_requested",
             "audit_trail": [f"analyst_{decision.get('decision', 'invalid')}"],
         }
+        if not _approved(decision):
+            result["analysis_feedback"] = str(decision.get("feedback", ""))
+        return result
 
-    def route_after_analysis(state: SdlcState) -> list[Send] | Literal["__end__"]:
+    def route_after_analysis(state: SdlcState) -> list[Send] | Literal["draft_analysis"]:
         decision = state["human_decisions"]["analyst"]
         if not _approved(decision):
-            return cast(Literal["__end__"], END)
+            return "draft_analysis"
         return [
             Send("prepare_development_plan", state),
             Send("prepare_test_plan", state),

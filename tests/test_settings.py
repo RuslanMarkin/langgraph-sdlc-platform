@@ -29,7 +29,8 @@ def test_deepseek_provider_selects_its_key_model_and_endpoint() -> None:
     assert settings.model_base_url == "https://api.deepseek.com"
 
 
-def test_openai_remains_the_default_provider() -> None:
+def test_openai_remains_the_default_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MODEL_PROVIDER", raising=False)
     settings = Settings(_env_file=None, openai_api_key="test-key")
 
     assert settings.model_provider == "openai"

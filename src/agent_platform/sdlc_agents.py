@@ -48,7 +48,14 @@ class TestPlanDraft(BaseModel):
 
 
 class AnalystAgent(Protocol):
-    def draft(self, request: BusinessRequest, repository_evidence: str) -> AnalysisDraft:
+    def draft(
+        self,
+        request: BusinessRequest,
+        repository_evidence: str,
+        *,
+        previous_draft: AnalysisDraft | None = None,
+        feedback: str | None = None,
+    ) -> AnalysisDraft:
         """Produce an analysis draft from the request and read-only evidence."""
 
 
@@ -114,7 +121,21 @@ class LangChainAnalystAgent:
             AnalysisDraft, method="json_mode"
         )
 
-    def draft(self, request: BusinessRequest, repository_evidence: str) -> AnalysisDraft:
+    def draft(
+        self,
+        request: BusinessRequest,
+        repository_evidence: str,
+        *,
+        previous_draft: AnalysisDraft | None = None,
+        feedback: str | None = None,
+    ) -> AnalysisDraft:
+        revision_context = ""
+        if previous_draft and feedback:
+            revision_context = (
+                "\n\nПредыдущий черновик:\n"
+                f"{previous_draft.model_dump_json(indent=2)}\n\n"
+                f"Замечания человека, обязательные для новой версии:\n{feedback}"
+            )
         response = self.model.invoke(
             [
                 SystemMessage(
@@ -130,6 +151,7 @@ class LangChainAnalystAgent:
                         f"Бизнес-задача ({request.feature_id}, {request.title}):\n"
                         f"{request.description}\n\n"
                         f"Свидетельства из репозитория:\n{repository_evidence}"
+                        f"{revision_context}"
                     )
                 ),
             ]

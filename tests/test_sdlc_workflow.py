@@ -13,11 +13,21 @@ from agent_platform.sdlc_workflow import build_sdlc_workflow
 
 
 class FakeAnalyst:
-    def draft(self, request: BusinessRequest, repository_evidence: str) -> AnalysisDraft:
+    feedback_received: str | None = None
+
+    def draft(
+        self,
+        request: BusinessRequest,
+        repository_evidence: str,
+        *,
+        previous_draft: AnalysisDraft | None = None,
+        feedback: str | None = None,
+    ) -> AnalysisDraft:
         assert request.feature_id == "CP-STATUS-001"
         assert "counterparties" in repository_evidence
+        self.feedback_received = feedback
         return AnalysisDraft(
-            summary="Добавить статусы.",
+            summary="Уточнить статусы." if previous_draft else "Добавить статусы.",
             scope=["Поле статуса"],
             non_goals=["Не блокировать договоры"],
             acceptance_criteria=["Статус виден в списке"],
@@ -84,3 +94,36 @@ def test_human_approvals_gate_parallel_development_and_test_preparation(tmp_path
     assert final["stage"] == "ready_for_implementation"
     assert final["human_decisions"]["analyst"]["reviewer"] == "analyst"
     assert final["human_decisions"]["plans"]["reviewer"] == "qa-lead"
+
+
+def test_rejected_analysis_is_revised_with_human_feedback(tmp_path: Any) -> None:
+    (tmp_path / "example.txt").write_text("counterparties table", encoding="utf-8")
+    analyst = FakeAnalyst()
+    graph = build_sdlc_workflow(
+        analyst, FakeDeveloper(), FakeTestDesigner(), checkpointer=InMemorySaver()
+    )
+    config = {"configurable": {"thread_id": "CP-STATUS-001-revision"}}
+
+    first = graph.invoke(workflow_input(str(tmp_path)), config=config)
+    assert first["analysis_draft"]["summary"] == "Добавить статусы."
+
+    revised = graph.invoke(
+        Command(
+            resume={
+                "decision": "reject",
+                "reviewer": "analyst",
+                "feedback": "Уточнить границы первой итерации.",
+            }
+        ),
+        config=config,
+    )
+
+    assert "__interrupt__" in revised
+    assert revised["__interrupt__"][0].value["gate"] == "analyst_approval"
+    assert revised["analysis_draft"]["summary"] == "Уточнить статусы."
+    assert analyst.feedback_received == "Уточнить границы первой итерации."
+    assert revised["audit_trail"] == [
+        "analyst_draft_created",
+        "analyst_reject",
+        "analyst_draft_created",
+    ]
