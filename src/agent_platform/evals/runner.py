@@ -1,9 +1,9 @@
 """Явный запуск локального dataset как Langfuse Experiment."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
-from langfuse import Langfuse, get_client
+from langfuse import Evaluation, Langfuse, get_client
 from langfuse.experiment import ExperimentItem
 
 from agent_platform.evals.dataset import EvaluationCase
@@ -11,6 +11,7 @@ from agent_platform.evals.graders import exact_match
 from agent_platform.settings import Settings
 
 EvaluationTask = Callable[[Any], Any]
+Evaluator = Callable[..., Evaluation]
 
 
 def run_local_experiment(
@@ -21,6 +22,7 @@ def run_local_experiment(
     task: EvaluationTask,
     description: str,
     metadata: dict[str, str] | None = None,
+    evaluators: Sequence[Evaluator] | None = None,
 ) -> Any:
     """Запустить task на локальном dataset и отправить оценки в Langfuse."""
     if not settings.langfuse_enabled:
@@ -43,7 +45,7 @@ def run_local_experiment(
         description=description,
         data=[case.to_langfuse_item() for case in cases],
         task=experiment_task,
-        evaluators=[exact_match],
+        evaluators=list(evaluators or [exact_match]),
         metadata=metadata or {},
     )
     client.flush()
