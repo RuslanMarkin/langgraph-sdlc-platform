@@ -8,10 +8,11 @@ from typing import Any, cast
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
+from agent_platform.github_approval import GitHubApprovalConfig, GitHubApprovalGateway
 from agent_platform.observability import flush_langfuse, langfuse_callbacks
 from agent_platform.sdlc_agents import build_production_agents
 from agent_platform.sdlc_workflow import build_sdlc_workflow
-from agent_platform.settings import get_settings
+from agent_platform.settings import Settings, get_settings
 
 
 def parse_args() -> argparse.Namespace:
@@ -30,7 +31,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def read_decision(gate: str) -> dict[str, Any]:
+def read_terminal_decision(gate: str) -> dict[str, Any]:
     """Require an explicit structured human decision before graph resumption."""
     while True:
         raw = input(f"Решение для {gate} (JSON, например {{\"decision\": \"approve\"}}): ")
@@ -49,11 +50,29 @@ def read_decision(gate: str) -> dict[str, Any]:
         return decision
 
 
+def build_github_gateway(settings: Settings) -> GitHubApprovalGateway | None:
+    """Build the selected external approval channel, if configured."""
+    if settings.approval_channel != "github":
+        return None
+    if not settings.github_token:
+        raise RuntimeError(
+            "Для APPROVAL_CHANNEL=github задайте GITHUB_TOKEN в локальном .env."
+        )
+    return GitHubApprovalGateway(
+        GitHubApprovalConfig(
+            token=settings.github_token,
+            repository=settings.github_repository,
+            poll_seconds=settings.github_approval_poll_seconds,
+        )
+    )
+
+
 def main() -> None:
     """Start and resume one in-memory pilot session until it reaches a final state."""
     args = parse_args()
     request = json.loads(Path(args.request).read_text(encoding="utf-8"))
     settings = get_settings()
+    github_gateway = build_github_gateway(settings)
     analyst, developer, test_designer = build_production_agents(settings)
     graph = build_sdlc_workflow(
         analyst,
@@ -78,10 +97,22 @@ def main() -> None:
         config=config,
     )
     while "__interrupt__" in result:
-        gate = result["__interrupt__"][0].value["gate"]
+        artifact = cast(dict[str, Any], result["__interrupt__"][0].value)
+        gate = str(artifact["gate"])
         print("\nАртефакт для проверки:\n")
-        print(json.dumps(result["__interrupt__"][0].value, ensure_ascii=False, indent=2))
-        result = graph.invoke(Command(resume=read_decision(gate)), config=config)
+        print(json.dumps(artifact, ensure_ascii=False, indent=2))
+        if github_gateway:
+            issue_number, issue_url = github_gateway.create_gate_issue(
+                feature_id=str(request["feature_id"]),
+                title=str(request["title"]),
+                gate=gate,
+                artifact=artifact,
+            )
+            print(f"\nОжидается решение в GitHub: {issue_url}")
+            decision = github_gateway.wait_for_decision(issue_number)
+        else:
+            decision = read_terminal_decision(gate)
+        result = graph.invoke(Command(resume=decision), config=config)
 
     flush_langfuse(settings)
     print("\nФинальное состояние:\n")

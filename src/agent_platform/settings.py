@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     deepseek_api_key: str | None = None
     deepseek_model: str = "deepseek-flash"
     deepseek_base_url: str = "https://api.deepseek.com"
+    approval_channel: Literal["terminal", "github"] = "terminal"
+    github_token: str | None = None
+    github_repository: str = "RuslanMarkin/CRM_Almaz"
+    github_approval_poll_seconds: int = 10
     langfuse_public_key: str | None = None
     langfuse_secret_key: str | None = None
     langfuse_host: str = "https://cloud.langfuse.com"
@@ -45,6 +49,11 @@ class Settings(BaseSettings):
         if self.model_provider == "deepseek":
             return self.deepseek_base_url
         return None
+
+    @property
+    def github_approval_enabled(self) -> bool:
+        """Return whether GitHub is selected and has the required credential."""
+        return self.approval_channel == "github" and bool(self.github_token)
 
 
 @lru_cache

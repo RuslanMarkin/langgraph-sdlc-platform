@@ -141,3 +141,24 @@ docker compose run --rm app python -m agent_platform.run_sdlc_pilot \
 Перед запуском создайте локальную, некоммитируемую папку `sdlc-input/` и
 положите в неё `request.json`. CRM подключается в контейнер только для чтения
 как `/work/crm-almaz`; агент не может записывать в него из этого workflow.
+
+### Подтверждения через GitHub
+
+При `APPROVAL_CHANNEL=github` каждый LangGraph interrupt создаёт Issue в
+`GITHUB_REPOSITORY` с полным артефактом. Владелец или участник репозитория
+оставляет комментарий `/approve` либо `/reject причина`. Команда сохраняется
+в состоянии с GitHub-логином, ссылкой и временем, Issue закрывается, а graph
+продолжает выполнение.
+
+Для локального пилота добавьте в `.env` fine-grained token с доступом только к
+целевому репозиторию и правом **Issues: Read and write**:
+
+```text
+APPROVAL_CHANNEL=github
+GITHUB_TOKEN=github_pat_...
+GITHUB_REPOSITORY=RuslanMarkin/CRM_Almaz
+```
+
+Локальный процесс должен оставаться запущенным, пока ожидается решение. Для
+облачного многопользовательского режима следующим шагом потребуется постоянный
+LangGraph checkpointer вместо `InMemorySaver`.
