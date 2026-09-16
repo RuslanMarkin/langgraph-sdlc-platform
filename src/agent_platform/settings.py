@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     approval_channel: Literal["terminal", "github"] = "terminal"
     github_token: str | None = None
     github_repository: str = "RuslanMarkin/CRM_Almaz"
+    sdlc_base_branch: str = "main"
     github_approval_poll_seconds: int = 10
     sdlc_database_url: str | None = None
     langfuse_public_key: str | None = None

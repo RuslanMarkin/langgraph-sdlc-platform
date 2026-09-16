@@ -3,8 +3,11 @@
 import json
 import re
 import time
+from base64 import b64encode
 from dataclasses import dataclass
 from typing import Any, cast
+from urllib.error import HTTPError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 TRUSTED_ASSOCIATIONS = {"OWNER", "MEMBER", "COLLABORATOR"}
@@ -67,6 +70,42 @@ def parse_approval_gate_marker(issue_body: str) -> str | None:
     """Read the expected interrupt gate from an approval Issue."""
     match = APPROVAL_MARKER_PATTERN.search(issue_body)
     return match.group("gate") if match else None
+
+
+def feature_branch_name(feature_id: str, title: str) -> str:
+    """Build a deterministic, repository-safe branch name from one approved feature."""
+    normalized_id = re.sub(r"[^a-z0-9]+", "-", feature_id.lower()).strip("-")
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    return f"sdlc/{normalized_id or 'feature'}-{(slug or 'handoff')[:48]}"
+
+
+def render_feature_handoff(
+    *,
+    feature_id: str,
+    title: str,
+    source_issue_url: str,
+    analysis: dict[str, Any],
+    development_plan: dict[str, Any],
+    test_plan: dict[str, Any],
+) -> str:
+    """Create the only initial branch change: a reviewable handoff artifact."""
+    sections = [
+        ("Утверждённая аналитическая спецификация", analysis),
+        ("Утверждённый план разработки", development_plan),
+        ("Утверждённый QA-план", test_plan),
+    ]
+    rendered_sections = "\n\n".join(
+        f"## {heading}\n\n```json\n{json.dumps(artifact, ensure_ascii=False, indent=2)}\n```"
+        for heading, artifact in sections
+    )
+    return (
+        f"# SDLC handoff: {feature_id}\n\n"
+        f"**Бизнес-задача:** [{title}]({source_issue_url})\n\n"
+        "Этот файл автоматически создан после human approval. На данном этапе "
+        "ветка не содержит продуктовых изменений: реализация должна выполняться "
+        "только в этом draft PR и проходить обычный GitHub review.\n\n"
+        f"{rendered_sections}\n"
+    )
 
 
 class GitHubApprovalGateway:
@@ -176,3 +215,94 @@ class GitHubApprovalGateway:
             },
         )
         self._request("PATCH", f"/issues/{issue_number}", {"state": "closed"})
+
+    def create_draft_feature_pr(
+        self,
+        *,
+        feature_id: str,
+        title: str,
+        base_branch: str,
+        source_issue_url: str,
+        analysis: dict[str, Any],
+        development_plan: dict[str, Any],
+        test_plan: dict[str, Any],
+    ) -> tuple[str, int, str]:
+        """Create one isolated handoff branch and a draft PR, idempotently."""
+        branch = feature_branch_name(feature_id, title)
+        self._ensure_branch(branch, base_branch)
+        handoff_path = f"docs/sdlc/{feature_id}.md"
+        self._ensure_handoff_document(
+            branch=branch,
+            path=handoff_path,
+            content=render_feature_handoff(
+                feature_id=feature_id,
+                title=title,
+                source_issue_url=source_issue_url,
+                analysis=analysis,
+                development_plan=development_plan,
+                test_plan=test_plan,
+            ),
+        )
+        existing = self._find_open_pr(branch)
+        if existing:
+            return branch, int(existing["number"]), str(existing["html_url"])
+        pull_request = self._request(
+            "POST",
+            "/pulls",
+            {
+                "title": f"[SDLC] {feature_id}: {title}",
+                "head": branch,
+                "base": base_branch,
+                "draft": True,
+                "body": (
+                    "## Автоматически созданный handoff\n\n"
+                    f"Исходная бизнес-задача: {source_issue_url}\n\n"
+                    f"Ветка содержит только [{handoff_path}]({handoff_path}) с утверждёнными "
+                    "артефактами. Агент не менял продуктовый код и не может выполнить merge.\n\n"
+                    "Следующий этап — реализация в этой ветке, запуск CI и human review."
+                ),
+            },
+        )
+        return branch, int(pull_request["number"]), str(pull_request["html_url"])
+
+    def _ensure_branch(self, branch: str, base_branch: str) -> None:
+        branch_ref = f"/git/ref/heads/{quote(branch, safe='/')}"
+        try:
+            self._request("GET", branch_ref)
+            return
+        except HTTPError as error:
+            if error.code != 404:
+                raise
+        base_ref = self._request("GET", f"/git/ref/heads/{quote(base_branch, safe='/')}")
+        self._request(
+            "POST",
+            "/git/refs",
+            {"ref": f"refs/heads/{branch}", "sha": str(base_ref["object"]["sha"])},
+        )
+
+    def _ensure_handoff_document(self, *, branch: str, path: str, content: str) -> None:
+        encoded_branch = quote(branch, safe="")
+        try:
+            self._request("GET", f"/contents/{path}?ref={encoded_branch}")
+            return
+        except HTTPError as error:
+            if error.code != 404:
+                raise
+        self._request(
+            "PUT",
+            f"/contents/{path}",
+            {
+                "message": "Добавить утверждённый SDLC handoff",
+                "content": b64encode(content.encode("utf-8")).decode("ascii"),
+                "branch": branch,
+            },
+        )
+
+    def _find_open_pr(self, branch: str) -> dict[str, Any] | None:
+        owner, _ = self.config.repository.split("/", maxsplit=1)
+        pulls = self._request(
+            "GET", f"/pulls?state=open&head={quote(f'{owner}:{branch}', safe='')}"
+        )
+        if not isinstance(pulls, list):
+            raise RuntimeError("GitHub вернул некорректный список pull request.")
+        return cast(dict[str, Any], pulls[0]) if pulls else None
