@@ -146,7 +146,7 @@ def run_resume(args: argparse.Namespace, settings: Settings) -> None:
     thread_id = parse_thread_marker(str(approval_issue.get("body") or ""))
     if not thread_id:
         raise RuntimeError("Issue не содержит маркер LangGraph thread_id.")
-    comment = gateway.get_comment(args.approval_issue_number, args.comment_id)
+    comment = gateway.get_comment(args.comment_id)
     decision = parse_approval_comment(comment)
     if decision is None:
         print(json.dumps({"status": "ignored_comment", "thread_id": thread_id}))

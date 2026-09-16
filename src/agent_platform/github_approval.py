@@ -128,9 +128,9 @@ class GitHubApprovalGateway:
             raise RuntimeError("GitHub вернул некорректный ответ для Issue.")
         return cast(dict[str, Any], issue)
 
-    def get_comment(self, issue_number: int, comment_id: int) -> dict[str, Any]:
+    def get_comment(self, comment_id: int) -> dict[str, Any]:
         """Load the exact comment delivered by the GitHub issue_comment event."""
-        comment = self._request("GET", f"/issues/{issue_number}/comments/{comment_id}")
+        comment = self._request("GET", f"/issues/comments/{comment_id}")
         if not isinstance(comment, dict):
             raise RuntimeError("GitHub вернул некорректный ответ для комментария.")
         return cast(dict[str, Any], comment)
