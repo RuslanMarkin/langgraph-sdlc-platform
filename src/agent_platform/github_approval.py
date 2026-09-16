@@ -72,6 +72,24 @@ def parse_approval_gate_marker(issue_body: str) -> str | None:
     return match.group("gate") if match else None
 
 
+def is_recoverable_final_approval(
+    *,
+    approval_issue: dict[str, Any],
+    issue_gate: str | None,
+    decision: dict[str, Any],
+    pending_gate: str | None,
+    workflow_stage: str | None,
+) -> bool:
+    """Allow retry only for a completed final approval after a delivery failure."""
+    return (
+        approval_issue.get("state") == "closed"
+        and issue_gate == "development_and_test_approval"
+        and decision.get("decision") == "approve"
+        and pending_gate is None
+        and workflow_stage == "ready_for_implementation"
+    )
+
+
 def feature_branch_name(feature_id: str, title: str) -> str:
     """Build a deterministic, repository-safe branch name from one approved feature."""
     normalized_id = re.sub(r"[^a-z0-9]+", "-", feature_id.lower()).strip("-")
@@ -130,8 +148,14 @@ class GitHubApprovalGateway:
                 "X-GitHub-Api-Version": "2022-11-28",
             },
         )
-        with urlopen(request, timeout=30) as response:  # noqa: S310 - fixed GitHub API origin
-            return cast(Any, json.loads(response.read().decode("utf-8")))
+        try:
+            with urlopen(request, timeout=30) as response:  # noqa: S310 - fixed GitHub API origin
+                return cast(Any, json.loads(response.read().decode("utf-8")))
+        except HTTPError as error:
+            details = error.read().decode("utf-8", errors="replace")[-1_000:]
+            raise RuntimeError(
+                f"GitHub API {method} {path} вернул {error.code}: {details}"
+            ) from error
 
     def create_gate_issue(
         self,

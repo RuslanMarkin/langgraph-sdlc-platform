@@ -10,6 +10,7 @@ from langgraph.types import Command
 from agent_platform.github_approval import (
     GitHubApprovalConfig,
     GitHubApprovalGateway,
+    is_recoverable_final_approval,
     is_trusted_author,
     parse_approval_comment,
     parse_approval_gate_marker,
@@ -103,6 +104,67 @@ def _pending_gate(snapshot: Any) -> str | None:
     return None
 
 
+def _finish_implementation(
+    *,
+    args: argparse.Namespace,
+    settings: Settings,
+    gateway: GitHubApprovalGateway,
+    thread_id: str,
+    completed_state: dict[str, Any],
+) -> None:
+    """Create or reuse the feature PR, then safely implement the approved plan."""
+    request = cast(dict[str, Any], completed_state["request"])
+    source_issue_number = thread_id.rsplit(":", maxsplit=1)[-1]
+    source_issue_url = f"https://github.com/{settings.github_repository}/issues/{source_issue_number}"
+    branch, pull_number, pull_url = gateway.create_draft_feature_pr(
+        feature_id=str(request["feature_id"]),
+        title=str(request["title"]),
+        base_branch=settings.sdlc_base_branch,
+        source_issue_url=source_issue_url,
+        analysis=cast(dict[str, Any], completed_state["analysis_draft"]),
+        development_plan=cast(dict[str, Any], completed_state["development_plan"]),
+        test_plan=cast(dict[str, Any], completed_state["test_plan"]),
+    )
+    analysis = AnalysisDraft.model_validate(completed_state["analysis_draft"])
+    development_plan = DevelopmentPlan.model_validate(completed_state["development_plan"])
+    test_plan = TestPlanDraft.model_validate(completed_state["test_plan"])
+    workspace = FeatureBranchWorkspace(args.project_root)
+    workspace.checkout(branch)
+    patch, allowed_paths = build_implementation_agent(settings).implement(
+        analysis=analysis,
+        development_plan=development_plan,
+        test_plan=test_plan,
+        project_root=args.project_root,
+        evidence_paths=args.evidence,
+    )
+    verification = workspace.verify_commit_and_push(
+        paths=workspace.apply_patch(patch, allowed_paths),
+        feature_id=str(request["feature_id"]),
+    )
+    gateway.add_issue_comment(
+        pull_number,
+        (
+            "## Реализация агентом завершена\n\n"
+            f"{patch.summary}\n\n"
+            f"Проверка: `{verification}`.\n\n"
+            "PR остаётся draft. Перед переводом в review и merge требуется "
+            "проверить изменения человеком."
+        ),
+    )
+    print(
+        json.dumps(
+            {
+                "status": "draft_pr_created",
+                "branch": branch,
+                "pull_number": pull_number,
+                "pull_url": pull_url,
+                "verification": verification,
+                "thread_id": thread_id,
+            }
+        )
+    )
+
+
 def run_start(args: argparse.Namespace, settings: Settings) -> None:
     """Start an SDLC thread once from a labelled business Issue."""
     gateway = _build_gateway(settings)
@@ -161,6 +223,21 @@ def run_resume(args: argparse.Namespace, settings: Settings) -> None:
         analyst, developer, test_designer = build_production_agents(settings)
         graph = build_sdlc_workflow(analyst, developer, test_designer, checkpointer=checkpointer)
         snapshot = graph.get_state(config)
+        if is_recoverable_final_approval(
+            approval_issue=approval_issue,
+            issue_gate=issue_gate,
+            decision=decision,
+            pending_gate=_pending_gate(snapshot),
+            workflow_stage=snapshot.values.get("stage"),
+        ):
+            _finish_implementation(
+                args=args,
+                settings=settings,
+                gateway=gateway,
+                thread_id=thread_id,
+                completed_state=cast(dict[str, Any], snapshot.values),
+            )
+            return
         if approval_issue.get("state") != "open" or issue_gate != _pending_gate(snapshot):
             print(json.dumps({"status": "stale_comment", "thread_id": thread_id}))
             return
@@ -176,57 +253,12 @@ def run_resume(args: argparse.Namespace, settings: Settings) -> None:
         )
         if interrupted:
             return
-        source_issue_number = thread_id.rsplit(":", maxsplit=1)[-1]
-        source_issue_url = (
-            f"https://github.com/{settings.github_repository}/issues/{source_issue_number}"
-        )
-        completed_state = graph.get_state(config).values
-        branch, pull_number, pull_url = gateway.create_draft_feature_pr(
-            feature_id=str(request["feature_id"]),
-            title=str(request["title"]),
-            base_branch=settings.sdlc_base_branch,
-            source_issue_url=source_issue_url,
-            analysis=cast(dict[str, Any], completed_state["analysis_draft"]),
-            development_plan=cast(dict[str, Any], completed_state["development_plan"]),
-            test_plan=cast(dict[str, Any], completed_state["test_plan"]),
-        )
-        analysis = AnalysisDraft.model_validate(completed_state["analysis_draft"])
-        development_plan = DevelopmentPlan.model_validate(completed_state["development_plan"])
-        test_plan = TestPlanDraft.model_validate(completed_state["test_plan"])
-        workspace = FeatureBranchWorkspace(args.project_root)
-        workspace.checkout(branch)
-        patch, allowed_paths = build_implementation_agent(settings).implement(
-            analysis=analysis,
-            development_plan=development_plan,
-            test_plan=test_plan,
-            project_root=args.project_root,
-            evidence_paths=args.evidence,
-        )
-        verification = workspace.verify_commit_and_push(
-            paths=workspace.apply_patch(patch, allowed_paths),
-            feature_id=str(request["feature_id"]),
-        )
-        gateway.add_issue_comment(
-            pull_number,
-            (
-                "## Реализация агентом завершена\n\n"
-                f"{patch.summary}\n\n"
-                f"Проверка: `{verification}`.\n\n"
-                "PR остаётся draft. Перед переводом в review и merge требуется "
-                "проверить изменения человеком."
-            ),
-        )
-        print(
-            json.dumps(
-                {
-                    "status": "draft_pr_created",
-                    "branch": branch,
-                    "pull_number": pull_number,
-                    "pull_url": pull_url,
-                    "verification": verification,
-                    "thread_id": thread_id,
-                }
-            )
+        _finish_implementation(
+            args=args,
+            settings=settings,
+            gateway=gateway,
+            thread_id=thread_id,
+            completed_state=cast(dict[str, Any], graph.get_state(config).values),
         )
 
 
