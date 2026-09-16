@@ -118,6 +118,22 @@ def test_human_approvals_gate_parallel_development_and_test_preparation(tmp_path
     assert final["human_decisions"]["plans"]["reviewer"] == "qa-lead"
 
 
+def test_parallel_gate_is_not_repeated_when_checkpoint_is_resumed(tmp_path: Any) -> None:
+    (tmp_path / "example.txt").write_text("counterparties table", encoding="utf-8")
+    graph = build_sdlc_workflow(
+        FakeAnalyst(), FakeDeveloper(), FakeTestDesigner(), checkpointer=InMemorySaver()
+    )
+    config = {"configurable": {"thread_id": "approval-metadata"}}
+
+    graph.invoke(workflow_input(str(tmp_path)), config=config)
+    graph.invoke(Command(resume={"decision": "approve"}), config=config)
+
+    final = graph.invoke(Command(resume={"decision": "approve"}), config=config)
+
+    assert "__interrupt__" not in final
+    assert final["stage"] == "ready_for_implementation"
+
+
 def test_rejected_analysis_is_revised_with_human_feedback(tmp_path: Any) -> None:
     (tmp_path / "example.txt").write_text("counterparties table", encoding="utf-8")
     analyst = FakeAnalyst()

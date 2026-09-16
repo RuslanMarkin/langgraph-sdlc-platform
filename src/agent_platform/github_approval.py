@@ -9,6 +9,7 @@ from urllib.request import Request, urlopen
 
 TRUSTED_ASSOCIATIONS = {"OWNER", "MEMBER", "COLLABORATOR"}
 THREAD_MARKER_PATTERN = re.compile(r"<!-- sdlc-thread:(?P<thread_id>[^\n]+) -->")
+APPROVAL_MARKER_PATTERN = re.compile(r"<!-- sdlc-approval:[^:\n]+:(?P<gate>[^\s>]+) -->")
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,12 @@ def parse_thread_marker(issue_body: str) -> str | None:
     """Extract the LangGraph thread identifier stored in an approval Issue."""
     match = THREAD_MARKER_PATTERN.search(issue_body)
     return match.group("thread_id") if match else None
+
+
+def parse_approval_gate_marker(issue_body: str) -> str | None:
+    """Read the expected interrupt gate from an approval Issue."""
+    match = APPROVAL_MARKER_PATTERN.search(issue_body)
+    return match.group("gate") if match else None
 
 
 class GitHubApprovalGateway:
