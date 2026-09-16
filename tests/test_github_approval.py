@@ -1,4 +1,8 @@
-from agent_platform.github_approval import parse_approval_comment, parse_thread_marker
+from agent_platform.github_approval import (
+    is_trusted_author,
+    parse_approval_comment,
+    parse_thread_marker,
+)
 
 
 def github_comment(body: str, association: str = "OWNER") -> dict[str, object]:
@@ -35,6 +39,11 @@ def test_rejection_requires_feedback() -> None:
 
 def test_untrusted_public_comment_is_ignored() -> None:
     assert parse_approval_comment(github_comment("/approve", association="NONE")) is None
+    assert not is_trusted_author(github_comment("текст", association="NONE"))
+
+
+def test_repository_participant_can_start_sdlc() -> None:
+    assert is_trusted_author(github_comment("текст", association="COLLABORATOR"))
 
 
 def test_thread_marker_is_read_from_approval_issue_body() -> None:
