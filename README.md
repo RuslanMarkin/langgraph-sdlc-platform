@@ -43,6 +43,19 @@ docker compose run --rm app python -m agent_platform.healthcheck
 
 Последняя команда создаст одну тестовую трассировку в Langfuse, если ключи заполнены. Без ключей workflow остаётся работоспособным, а отправка телеметрии отключается.
 
+### Управляемые SDLC-подсказки
+
+Реальные роли SDLC получают chat-prompt из Langfuse Prompt Management, а не из
+исходного кода. В проекте используются `sdlc/analyst-specification`,
+`sdlc/development-plan` и `sdlc/qa-test-plan`. Код загружает версию с меткой
+`LANGFUSE_PROMPT_LABEL=production`, подставляет бизнес-задачу и разрешённые
+свидетельства из репозитория только во время вызова модели.
+
+Сначала изменяйте prompt с меткой `staging` и проверяйте его в Playground или
+evals. Затем вручную переключайте на версию метку `production`. Имя и версия
+prompt связываются с trace Langfuse; секреты и данные доступа никогда не
+хранятся в prompt.
+
 ### 4. Проследить передачу прикладной задачи
 
 После слияния разработки запускайте graph handoff для конкретной фичи. Он
@@ -82,7 +95,9 @@ git switch -c feature/<краткое-название>
 | `DEEPSEEK_BASE_URL` | OpenAI-совместимый endpoint DeepSeek | нет |
 | `LANGFUSE_PUBLIC_KEY` | Публичный ключ проекта Langfuse | да для телеметрии |
 | `LANGFUSE_SECRET_KEY` | Секретный ключ проекта Langfuse | да для телеметрии |
-| `LANGFUSE_HOST` | Региональный endpoint Langfuse | нет |
+| `LANGFUSE_BASE_URL` | Региональный endpoint Langfuse | нет |
+| `LANGFUSE_PROMPT_LABEL` | Метка версии SDLC prompt в Langfuse | нет, `production` по умолчанию |
+| `LANGFUSE_PROMPT_CACHE_TTL_SECONDS` | Время кэша prompt в секундах | нет, `300` по умолчанию |
 
 Никогда не коммитьте `.env` или ключи в GitHub. Для CI-сценариев добавляйте секреты через **Settings → Secrets and variables → Actions**.
 

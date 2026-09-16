@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     langfuse_public_key: str | None = None
     langfuse_secret_key: str | None = None
     langfuse_base_url: str = "https://cloud.langfuse.com"
+    langfuse_prompt_label: str = "production"
+    langfuse_prompt_cache_ttl_seconds: int = 300
 
     @property
     def langfuse_enabled(self) -> bool:
