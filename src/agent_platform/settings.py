@@ -1,6 +1,7 @@
 """Environment-backed configuration. Secrets are never stored in source control."""
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -10,8 +11,12 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    model_provider: Literal["openai", "deepseek"] = "openai"
     openai_api_key: str | None = None
     openai_model: str = "gpt-4.1-mini"
+    deepseek_api_key: str | None = None
+    deepseek_model: str = "deepseek-flash"
+    deepseek_base_url: str = "https://api.deepseek.com"
     langfuse_public_key: str | None = None
     langfuse_secret_key: str | None = None
     langfuse_host: str = "https://cloud.langfuse.com"
@@ -19,6 +24,27 @@ class Settings(BaseSettings):
     @property
     def langfuse_enabled(self) -> bool:
         return bool(self.langfuse_public_key and self.langfuse_secret_key)
+
+    @property
+    def model_api_key(self) -> str | None:
+        """Return the credential for the selected model provider."""
+        if self.model_provider == "deepseek":
+            return self.deepseek_api_key
+        return self.openai_api_key
+
+    @property
+    def active_model(self) -> str:
+        """Return the model name configured for the selected provider."""
+        if self.model_provider == "deepseek":
+            return self.deepseek_model
+        return self.openai_model
+
+    @property
+    def model_base_url(self) -> str | None:
+        """Use DeepSeek's OpenAI-compatible endpoint when selected."""
+        if self.model_provider == "deepseek":
+            return self.deepseek_base_url
+        return None
 
 
 @lru_cache

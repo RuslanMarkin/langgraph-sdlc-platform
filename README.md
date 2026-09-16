@@ -74,8 +74,12 @@ git switch -c feature/<краткое-название>
 
 | Переменная | Назначение | Обязательна |
 | --- | --- | --- |
-| `OPENAI_API_KEY` | Ключ провайдера модели для будущих графов | нет для smoke-check |
+| `MODEL_PROVIDER` | `openai` или `deepseek` | нет для smoke-check |
+| `OPENAI_API_KEY` | Ключ OpenAI | только при `MODEL_PROVIDER=openai` |
 | `OPENAI_MODEL` | Модель по умолчанию | нет |
+| `DEEPSEEK_API_KEY` | Ключ DeepSeek | только при `MODEL_PROVIDER=deepseek` |
+| `DEEPSEEK_MODEL` | Модель DeepSeek, по умолчанию `deepseek-flash` | нет |
+| `DEEPSEEK_BASE_URL` | OpenAI-совместимый endpoint DeepSeek | нет |
 | `LANGFUSE_PUBLIC_KEY` | Публичный ключ проекта Langfuse | да для телеметрии |
 | `LANGFUSE_SECRET_KEY` | Секретный ключ проекта Langfuse | да для телеметрии |
 | `LANGFUSE_HOST` | Региональный endpoint Langfuse | нет |
@@ -103,8 +107,9 @@ git switch -c feature/<краткое-название>
 Для локального демо используется `InMemorySaver`. Перед подключением к реальной
 GitHub-автоматизации его нужно заменить на постоянный checkpointer PostgreSQL:
 это сохраняет ожидание решения человека при перезапуске процесса. Реальные
-LLM-агенты активируются только при локально заданном `OPENAI_API_KEY`; без него
-в CI работают детерминированные тестовые двойники.
+LLM-агенты активируются только при локально заданном ключе выбранного провайдера:
+`OPENAI_API_KEY` или `DEEPSEEK_API_KEY`. Без него в CI работают
+детерминированные тестовые двойники.
 
 Запуск пилота с реальными агентами выполняется только вручную и не меняет
 репозиторий. Сначала создайте вне Git файл `request.json`:
