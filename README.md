@@ -27,7 +27,7 @@ datasets, deterministic graders и adapter к Langfuse Experiments. Подроб
 3. Скопируйте шаблон окружения: `cp .env.example .env`.
 4. Заполните `LANGFUSE_PUBLIC_KEY` и `LANGFUSE_SECRET_KEY`.
 
-Для европейского региона оставьте `LANGFUSE_HOST=https://cloud.langfuse.com`; для US-региона замените адрес на `https://us.cloud.langfuse.com`.
+Для европейского региона оставьте `LANGFUSE_BASE_URL=https://cloud.langfuse.com`; для US-региона замените адрес на `https://us.cloud.langfuse.com`.
 
 ### 2. Установите Docker Desktop
 
