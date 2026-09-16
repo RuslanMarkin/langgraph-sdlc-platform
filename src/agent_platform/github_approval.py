@@ -58,9 +58,7 @@ class GitHubApprovalGateway:
         self.config = config
         self.api_root = f"https://api.github.com/repos/{config.repository}"
 
-    def _request(
-        self, method: str, path: str, payload: dict[str, Any] | None = None
-    ) -> Any:
+    def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> Any:
         data = None if payload is None else json.dumps(payload).encode("utf-8")
         request = Request(
             f"{self.api_root}{path}",

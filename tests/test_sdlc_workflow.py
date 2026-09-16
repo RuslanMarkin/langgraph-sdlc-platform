@@ -37,19 +37,41 @@ class FakeAnalyst:
 
 
 class FakeDeveloper:
-    def plan(self, analysis: AnalysisDraft) -> DevelopmentPlan:
+    feedback_received: str | None = None
+
+    def plan(
+        self,
+        analysis: AnalysisDraft,
+        *,
+        previous_plan: DevelopmentPlan | None = None,
+        feedback: str | None = None,
+    ) -> DevelopmentPlan:
+        self.feedback_received = feedback
         return DevelopmentPlan(
-            implementation_steps=["Добавить поле"],
+            implementation_steps=["Исправить план" if previous_plan else "Добавить поле"],
             files_to_change=analysis.affected_files,
             migration_plan="Добавить колонку со значением normal.",
-            verification_commands=["pnpm test"],
+            verification_commands=["pnpm check" if previous_plan else "pnpm test"],
         )
 
 
 class FakeTestDesigner:
-    def plan(self, analysis: AnalysisDraft) -> QaTestPlanDraft:
+    feedback_received: str | None = None
+
+    def plan(
+        self,
+        analysis: AnalysisDraft,
+        *,
+        previous_plan: QaTestPlanDraft | None = None,
+        feedback: str | None = None,
+    ) -> QaTestPlanDraft:
+        self.feedback_received = feedback
         return QaTestPlanDraft(
-            automated_tests=["Проверить значение по умолчанию"],
+            automated_tests=[
+                "Повторно проверить значение"
+                if previous_plan
+                else "Проверить значение по умолчанию"
+            ],
             manual_staging_checks=["Проверить миграцию"],
             regression_risks=["Существующие записи"],
         )
@@ -127,3 +149,70 @@ def test_rejected_analysis_is_revised_with_human_feedback(tmp_path: Any) -> None
         "analyst_reject",
         "analyst_draft_created",
     ]
+
+
+def test_rejected_parallel_plans_are_revised_in_both_branches(tmp_path: Any) -> None:
+    (tmp_path / "example.txt").write_text("counterparties table", encoding="utf-8")
+    developer = FakeDeveloper()
+    test_designer = FakeTestDesigner()
+    graph = build_sdlc_workflow(
+        FakeAnalyst(), developer, test_designer, checkpointer=InMemorySaver()
+    )
+    config = {"configurable": {"thread_id": "CP-STATUS-001-plans-revision"}}
+
+    graph.invoke(workflow_input(str(tmp_path)), config=config)
+    first_plans = graph.invoke(Command(resume={"decision": "approve"}), config=config)
+    assert first_plans["development_plan"]["verification_commands"] == ["pnpm test"]
+
+    revised = graph.invoke(
+        Command(
+            resume={
+                "decision": "reject",
+                "reviewer": "Руслан",
+                "feedback": "Использовать MySQL и pnpm check.",
+            }
+        ),
+        config=config,
+    )
+
+    assert "__interrupt__" in revised
+    assert revised["__interrupt__"][0].value["gate"] == "development_and_test_approval"
+    assert revised["development_plan"]["verification_commands"] == ["pnpm check"]
+    assert revised["test_plan"]["automated_tests"] == ["Повторно проверить значение"]
+    assert developer.feedback_received == "Использовать MySQL и pnpm check."
+    assert test_designer.feedback_received == "Использовать MySQL и pnpm check."
+    assert revised["stage"] == "plans_revision_requested"
+
+
+def test_workflow_can_start_from_approved_analysis(tmp_path: Any) -> None:
+    developer = FakeDeveloper()
+    test_designer = FakeTestDesigner()
+    graph = build_sdlc_workflow(
+        FakeAnalyst(),
+        developer,
+        test_designer,
+        checkpointer=InMemorySaver(),
+        entry_stage="parallel",
+    )
+    state = workflow_input(str(tmp_path))
+    state.update(
+        {
+            "analysis_draft": AnalysisDraft(
+                summary="Добавить статусы.",
+                scope=["Поле статуса"],
+                non_goals=["Не блокировать договоры"],
+                acceptance_criteria=["Статус виден в списке"],
+                affected_files=["drizzle/schema.ts"],
+                risks_and_questions=[],
+            ).model_dump(),
+            "plans_feedback": "Использовать MySQL и pnpm check.",
+            "human_decisions": {"analyst": {"decision": "approve"}},
+        }
+    )
+
+    result = graph.invoke(state, config={"configurable": {"thread_id": "from-analysis"}})
+
+    assert "__interrupt__" in result
+    assert result["__interrupt__"][0].value["gate"] == "development_and_test_approval"
+    assert developer.feedback_received == "Использовать MySQL и pnpm check."
+    assert test_designer.feedback_received == "Использовать MySQL и pnpm check."

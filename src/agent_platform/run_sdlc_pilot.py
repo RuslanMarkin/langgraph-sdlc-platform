@@ -25,8 +25,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--evidence",
         action="append",
-        required=True,
+        default=[],
         help="Относительный путь к файлу, который агенту разрешено прочитать; можно повторять",
+    )
+    parser.add_argument(
+        "--approved-analysis",
+        help="Путь к JSON уже утверждённой спецификации для запуска сразу с параллельных планов",
+    )
+    parser.add_argument(
+        "--plans-feedback-file",
+        help="Путь к замечаниям человека для повторной подготовки планов",
+    )
+    parser.add_argument(
+        "--plans-feedback-reviewer",
+        help="GitHub login человека, который вернул планы на доработку",
+    )
+    parser.add_argument(
+        "--plans-feedback-source-url",
+        help="Ссылка на GitHub-комментарий с решением",
     )
     return parser.parse_args()
 
@@ -34,7 +50,7 @@ def parse_args() -> argparse.Namespace:
 def read_terminal_decision(gate: str) -> dict[str, Any]:
     """Require an explicit structured human decision before graph resumption."""
     while True:
-        raw = input(f"Решение для {gate} (JSON, например {{\"decision\": \"approve\"}}): ")
+        raw = input(f'Решение для {gate} (JSON, например {{"decision": "approve"}}): ')
         try:
             parsed = json.loads(raw)
         except json.JSONDecodeError:
@@ -55,9 +71,7 @@ def build_github_gateway(settings: Settings) -> GitHubApprovalGateway | None:
     if settings.approval_channel != "github":
         return None
     if not settings.github_token:
-        raise RuntimeError(
-            "Для APPROVAL_CHANNEL=github задайте GITHUB_TOKEN в локальном .env."
-        )
+        raise RuntimeError("Для APPROVAL_CHANNEL=github задайте GITHUB_TOKEN в локальном .env.")
     return GitHubApprovalGateway(
         GitHubApprovalConfig(
             token=settings.github_token,
@@ -71,6 +85,8 @@ def main() -> None:
     """Start and resume one in-memory pilot session until it reaches a final state."""
     args = parse_args()
     request = json.loads(Path(args.request).read_text(encoding="utf-8"))
+    if not args.approved_analysis and not args.evidence:
+        raise RuntimeError("Для подготовки аналитики укажите хотя бы один --evidence.")
     settings = get_settings()
     github_gateway = build_github_gateway(settings)
     analyst, developer, test_designer = build_production_agents(settings)
@@ -79,6 +95,7 @@ def main() -> None:
         developer,
         test_designer,
         checkpointer=InMemorySaver(),
+        entry_stage="parallel" if args.approved_analysis else "analysis",
     )
     config = {
         "callbacks": langfuse_callbacks(settings),
@@ -86,16 +103,45 @@ def main() -> None:
         "run_name": f"{request['feature_id']}: human-gated SDLC pilot",
         "tags": ["sdlc", "human-gated", "pilot"],
     }
-    result = graph.invoke(
-        {
-            "request": request,
-            "project_root": args.project_root,
-            "evidence_paths": args.evidence,
-            "stage": "new",
-            "audit_trail": [],
-        },
-        config=config,
-    )
+    initial_state: dict[str, Any] = {
+        "request": request,
+        "project_root": args.project_root,
+        "evidence_paths": args.evidence,
+        "stage": "new",
+        "audit_trail": [],
+        "human_decisions": {},
+    }
+    if args.approved_analysis:
+        initial_state.update(
+            {
+                "analysis_draft": json.loads(
+                    Path(args.approved_analysis).read_text(encoding="utf-8")
+                ),
+                "stage": "analysis_approved",
+                "human_decisions": {
+                    "analyst": {
+                        "decision": "approve",
+                        "reviewer": "Руслан",
+                        "source": "approved-analysis",
+                    }
+                },
+            }
+        )
+    if args.plans_feedback_file:
+        feedback = Path(args.plans_feedback_file).read_text(encoding="utf-8")
+        initial_state["plans_feedback"] = feedback
+        initial_state["human_decisions"] = {
+            **initial_state["human_decisions"],
+            "plans": {
+                "decision": "reject",
+                "reviewer": args.plans_feedback_reviewer or "unknown",
+                "feedback": feedback,
+                "source": "github" if args.plans_feedback_source_url else "file",
+                "source_url": args.plans_feedback_source_url or "",
+            },
+        }
+        initial_state["audit_trail"] = ["parallel_plans_reject_imported"]
+    result = graph.invoke(initial_state, config=config)
     while "__interrupt__" in result:
         artifact = cast(dict[str, Any], result["__interrupt__"][0].value)
         gate = str(artifact["gate"])
