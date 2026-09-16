@@ -130,15 +130,29 @@ def _finish_implementation(
     test_plan = TestPlanDraft.model_validate(completed_state["test_plan"])
     workspace = FeatureBranchWorkspace(args.project_root)
     workspace.checkout(branch)
-    patch, allowed_paths = build_implementation_agent(settings).implement(
+    implementation_agent = build_implementation_agent(settings)
+    patch, allowed_paths = implementation_agent.implement(
         analysis=analysis,
         development_plan=development_plan,
         test_plan=test_plan,
         project_root=args.project_root,
         evidence_paths=args.evidence,
     )
+    try:
+        paths = workspace.apply_patch(patch, allowed_paths)
+    except RuntimeError as error:
+        patch, allowed_paths = implementation_agent.implement(
+            analysis=analysis,
+            development_plan=development_plan,
+            test_plan=test_plan,
+            project_root=args.project_root,
+            evidence_paths=args.evidence,
+            previous_patch=patch,
+            validation_error=str(error),
+        )
+        paths = workspace.apply_patch(patch, allowed_paths)
     verification = workspace.verify_commit_and_push(
-        paths=workspace.apply_patch(patch, allowed_paths),
+        paths=paths,
         feature_id=str(request["feature_id"]),
     )
     gateway.add_issue_comment(

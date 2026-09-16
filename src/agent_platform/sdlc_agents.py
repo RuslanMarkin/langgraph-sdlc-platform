@@ -8,6 +8,7 @@ from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field, SecretStr, field_validator
 
+from agent_platform.observability import langfuse_callbacks
 from agent_platform.prompt_management import LangfusePromptManager
 from agent_platform.settings import Settings
 
@@ -254,6 +255,7 @@ class LangChainImplementationAgent:
     """LLM-backed patch author that cannot execute commands or write files itself."""
 
     def __init__(self, settings: Settings) -> None:
+        self.settings = settings
         self.model = _build_chat_model(settings).with_structured_output(
             ImplementationPatch, method="json_mode", include_raw=True
         )
@@ -261,7 +263,13 @@ class LangChainImplementationAgent:
 
     def _invoke_patch(self, messages: list[BaseMessage]) -> tuple[ImplementationPatch | None, str]:
         """Read a parsed patch without treating a malformed model reply as executable output."""
-        response = cast(dict[str, Any], self.model.invoke(messages))
+        response = cast(
+            dict[str, Any],
+            self.model.invoke(
+                messages,
+                config=cast(Any, {"callbacks": langfuse_callbacks(self.settings)}),
+            ),
+        )
         patch = response.get("parsed")
         if isinstance(patch, ImplementationPatch):
             return patch, ""
@@ -275,6 +283,8 @@ class LangChainImplementationAgent:
         test_plan: TestPlanDraft,
         project_root: str,
         evidence_paths: list[str],
+        previous_patch: ImplementationPatch | None = None,
+        validation_error: str | None = None,
     ) -> tuple[ImplementationPatch, list[str]]:
         """Generate one diff restricted to files approved in both plan and allowlist."""
         allowed_paths = sorted(set(development_plan.files_to_change) & set(evidence_paths))
@@ -291,12 +301,24 @@ class LangChainImplementationAgent:
             test_plan_json=test_plan.model_dump_json(indent=2),
             repository_evidence=_read_repository_evidence(project_root, allowed_paths),
         )
+        repair_context: list[BaseMessage] = []
+        if previous_patch and validation_error:
+            repair_context.append(
+                HumanMessage(
+                    content=(
+                        "Предыдущий unified diff не прошёл проверку Git. Сгенерируй полную "
+                        "замену diff, а не объяснение. Ошибка Git:\n"
+                        f"{validation_error}\n\nПредыдущий diff:\n{previous_patch.unified_diff}"
+                    ),
+                )
+            )
         with self.prompts.trace_context(prompt):
-            patch, error = self._invoke_patch(prompt.messages)
+            messages = [*prompt.messages, *repair_context]
+            patch, error = self._invoke_patch(messages)
             if patch is None:
                 patch, retry_error = self._invoke_patch(
                     [
-                        *prompt.messages,
+                        *messages,
                         HumanMessage(
                             content=(
                                 "Предыдущий ответ некорректен. Верни непустой unified diff: поле "
